@@ -10,3 +10,6 @@ src/.DS_Store
 # macOS
 .DS_Store
 src/.DS_Store
+
+# TypeScript build cache
+*.tsbuildinfo
