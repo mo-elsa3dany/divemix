@@ -2,3 +2,11 @@ node_modules
 .next
 .env
 
+
+# macOS
+.DS_Store
+src/.DS_Store
+
+# macOS
+.DS_Store
+src/.DS_Store

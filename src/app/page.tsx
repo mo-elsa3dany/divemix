@@ -11,7 +11,8 @@ export default function Home() {
       </nav>
 
       <p className="text-sm text-zinc-500 mt-6">
-        Disclaimer: Educational planning tool only. Not a substitute for formal training or a dive computer.
+        Disclaimer: Educational planning tool only. Not a substitute for formal training
+        or a dive computer.
       </p>
     </main>
   );

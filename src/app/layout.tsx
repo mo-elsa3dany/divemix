@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata } from 'next';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: "DiveMix — Dive Planner & Gas Mixer",
-  description: "Free, fast dive planner (NDL/MOD/PPO₂) and nitrox gas mixer. Educational use.",
+  title: 'DiveMix — Dive Planner & Gas Mixer',
+  description:
+    'Free, fast dive planner (NDL/MOD/PPO₂) and nitrox gas mixer. Educational use.',
 };
 
 export default function RootLayout({
