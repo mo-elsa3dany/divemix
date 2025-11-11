@@ -26,6 +26,12 @@ export default function RootLayout({
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        <header className="max-w-3xl mx-auto p-4 flex gap-4">
+  <a href="/">DiveMix</a>
+  <a href="/planner">Planner</a>
+  <a href="/mixer">Mixer</a>
+  <a href="/pricing">Pricing</a>
+</header>
       >
         {children}
       </body>
