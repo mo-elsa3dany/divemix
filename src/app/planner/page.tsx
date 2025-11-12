@@ -15,6 +15,7 @@ export default function Planner() {
   const { user } = useSupabaseAuth();
 
   const [units, setUnits] = useState<'m' | 'ft'>('m');
+  const [planName, setPlanName] = useState<string>('');
   const [depthInUI, setDepthInUI] = useState(18);
   const [time, setTime] = useState(40);
   const [fo2Pct, setFo2Pct] = useState(32);
