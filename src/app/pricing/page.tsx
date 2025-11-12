@@ -6,8 +6,14 @@ export default function Pricing() {
   const [email, setEmail] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState<number>(0);
 
   async function join() {
+    const now = Date.now();
+    if (now - last < 10_000) {
+      setMsg('Easy tiger — try again in a few seconds.');
+      return;
+    }
     if (!email.includes('@')) {
       setMsg('Enter a valid email.');
       return;
@@ -23,6 +29,7 @@ export default function Pricing() {
       } else {
         setMsg('All set — we’ll email you when Pro opens.');
         setEmail('');
+        setLast(now);
       }
     } catch (e: any) {
       setMsg(e.message || 'Could not join. Try again.');
