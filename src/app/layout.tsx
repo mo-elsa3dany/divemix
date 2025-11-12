@@ -17,6 +17,7 @@ export default function RootLayout({
           <a href="/">DiveMix</a>
           <a href="/planner">Planner</a>
           <a href="/mixer">Mixer</a>
+          <a href="/trimix">Trimix</a>
           <a href="/saved">Saved</a>
           <a href="/pricing">Pricing</a>
         </header>
