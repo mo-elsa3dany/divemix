@@ -1,31 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ppO2, modMeters, gasUsedLiters, mToFt } from '@/lib/calc/gas';
 import { clamp, toInt, toFloat } from '@/lib/utils/num';
-
-const KEY = 'divemix_plans';
-const LOAD_KEY = 'divemix_plan_to_load';
-
-type Plan = {
-  ts: number;
-  units: 'm' | 'ft';
-  depthUI: number; // as shown to user in current units
-  depthM: number; // meters (canonical)
-  time: number; // min
-  fo2Pct: number; // %
-  targetPp: number; // ata
-  sac: number; // L/min
-  result: { ppo2: number; mod: number; gas: number };
-};
+import { cnsPercent, otus } from '@/lib/calc/cns';
 
 export default function Planner() {
   const [units, setUnits] = useState<'m' | 'ft'>('m');
-  const [depthInUI, setDepthInUI] = useState(18);
-  const [time, setTime] = useState(40);
-  const [fo2Pct, setFo2Pct] = useState(32);
-  const [targetPp, setTargetPp] = useState(1.4);
-  const [sac, setSac] = useState(18);
+  const [depthInUI, setDepthInUI] = useState(18); // m or ft based on units
+  const [time, setTime] = useState(40); // min
+  const [fo2Pct, setFo2Pct] = useState(32); // %
+  const [targetPp, setTargetPp] = useState(1.4); // ata
+  const [sac, setSac] = useState(18); // L/min at surface
 
   // clamp all inputs
   const depthUI = clamp(depthInUI, 0, units === 'm' ? 60 : Math.round(60 * 3.28084));
@@ -47,56 +33,20 @@ export default function Planner() {
     () => gasUsedLiters(sacCl, timeCl, depthM),
     [sacCl, timeCl, depthM],
   );
-
-  // Load-once mechanism from Saved page (uses LOAD_KEY)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LOAD_KEY);
-      if (!raw) return;
-      const p: Plan = JSON.parse(raw);
-      localStorage.removeItem(LOAD_KEY);
-      // Apply stored values
-      setUnits(p.units);
-      setDepthInUI(p.units === 'm' ? p.depthM : Math.round(p.depthM * 3.28084));
-      setTime(p.time);
-      setFo2Pct(p.fo2Pct);
-      setTargetPp(p.targetPp);
-      setSac(p.sac);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  function savePlan() {
-    const entry: Plan = {
-      ts: Date.now(),
-      units,
-      depthUI,
-      depthM,
-      time: timeCl,
-      fo2Pct: fo2Cl,
-      targetPp: ppCl,
-      sac: sacCl,
-      result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL },
-    };
-    try {
-      const prev: Plan[] = JSON.parse(localStorage.getItem(KEY) || '[]');
-      const next = [entry, ...prev].slice(0, 50);
-      localStorage.setItem(KEY, JSON.stringify(next));
-      alert('Plan saved ✔');
-    } catch {
-      alert('Could not save plan.');
-    }
-  }
+  const cns = useMemo(() => cnsPercent(ppo2, timeCl), [ppo2, timeCl]);
+  const otu = useMemo(() => otus(ppo2, timeCl), [ppo2, timeCl]);
 
   const warnings: string[] = [];
   const errors: string[] = [];
+
   if (ppo2 > ppCl) warnings.push(`PPO₂ ${ppo2.toFixed(2)} exceeds max ${ppCl}.`);
   if (depthM > mod)
     warnings.push(`Depth ${depthM} m exceeds MOD ${mod} m for FO₂ ${fo2Cl}%.`);
   if (fo2Cl < 21 || fo2Cl > 40) errors.push('FO₂ must be 21–40%.');
   if (timeCl < 1 || timeCl > 300) errors.push('Time must be 1–300 minutes.');
   if (sacCl < 8 || sacCl > 30) warnings.push('SAC outside typical range (8–30 L/min).');
+  if (cns >= 80 && cns < 100) warnings.push(`High CNS load: ${cns}%`);
+  if (cns >= 100) errors.push(`CNS ${cns}% (exceeds 100%)`);
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
@@ -202,6 +152,14 @@ export default function Planner() {
         <div>
           <b>Estimated gas used:</b> {gasL} L
         </div>
+        <div className="pt-1 border-t mt-2">
+          <div>
+            <b>CNS%:</b> {cns}%
+          </div>
+          <div>
+            <b>OTU:</b> {otu}
+          </div>
+        </div>
       </section>
 
       {!!warnings.length && (
@@ -216,7 +174,31 @@ export default function Planner() {
       )}
 
       <div className="flex gap-3">
-        <button onClick={savePlan} className="border rounded px-4 py-2">
+        <button
+          onClick={() => {
+            const entry = {
+              ts: Date.now(),
+              units,
+              depthUI,
+              depthM,
+              time: timeCl,
+              fo2Pct: fo2Cl,
+              targetPp: ppCl,
+              sac: sacCl,
+              result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
+            };
+            try {
+              const KEY = 'divemix_plans';
+              const prev = JSON.parse(localStorage.getItem(KEY) || '[]');
+              const next = [entry, ...prev].slice(0, 50);
+              localStorage.setItem(KEY, JSON.stringify(next));
+              alert('Plan saved ✔');
+            } catch {
+              alert('Could not save plan.');
+            }
+          }}
+          className="border rounded px-4 py-2"
+        >
           Save Plan
         </button>
         <a href="/saved" className="underline self-center">
