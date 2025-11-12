@@ -7,8 +7,10 @@ const links = [
   { href: '/nitrox', label: 'Nitrox' },
   { href: '/trimix', label: 'Trimix' },
   { href: '/saved', label: 'Saved' },
+  { href: '/cloud', label: 'My Plans' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/status', label: 'Status' },
+  { href: '/login', label: 'Login' },
 ];
 
 export default function Nav() {

@@ -6,8 +6,12 @@ import { clamp, toInt, toFloat } from '@/lib/utils/num';
 import { cnsPercent, otus } from '@/lib/calc/cns';
 import { downloadJSON, downloadText } from '@/lib/utils/export';
 import { encodePlan, decodePlan, copy } from '@/lib/utils/share';
+import { useSupabaseAuth } from '@/lib/supabase/useAuth';
+import { supabase } from '@/lib/supabase/client';
 
 export default function Planner() {
+  const { user } = useSupabaseAuth();
+
   const [units, setUnits] = useState<'m' | 'ft'>('m');
   const [depthInUI, setDepthInUI] = useState(18);
   const [time, setTime] = useState(40);
@@ -17,14 +21,12 @@ export default function Planner() {
   const [label, setLabel] = useState('');
   const [site, setSite] = useState('');
 
-  // clamps
   const depthUI = clamp(depthInUI, 0, units === 'm' ? 60 : Math.round(60 * 3.28084));
   const timeCl = clamp(time, 1, 300);
   const fo2Cl = clamp(fo2Pct, 21, 40);
   const ppCl = clamp(targetPp, 1.0, 1.6);
   const sacCl = clamp(sac, 8, 30);
 
-  // meters canonical
   const depthM = useMemo(
     () => (units === 'm' ? depthUI : Math.round(depthUI / 3.28084)),
     [depthUI, units],
@@ -40,7 +42,6 @@ export default function Planner() {
   const cns = useMemo(() => cnsPercent(ppo2, timeCl), [ppo2, timeCl]);
   const otu = useMemo(() => otus(ppo2, timeCl), [ppo2, timeCl]);
 
-  // URL import (?p=... or #p=...)
   useEffect(() => {
     try {
       const url = new URL(window.location.href);
@@ -232,6 +233,49 @@ export default function Planner() {
       )}
 
       <div className="flex gap-3 flex-wrap">
+        {user ? (
+          <button
+            className="btn btn-primary"
+            onClick={async () => {
+              try {
+                const row = {
+                  user_id: user.id,
+                  label: label || null,
+                  site: site || null,
+                  depth_m: depthM,
+                  time_min: timeCl,
+                  fo2_pct: fo2Cl,
+                  target_ppo2: +ppo2.toFixed(2),
+                  sac_lpm: sacCl,
+                  result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
+                  raw: {
+                    units,
+                    depthUI,
+                    depthM,
+                    time: timeCl,
+                    fo2Pct: fo2Cl,
+                    targetPp: ppCl,
+                    sac: sacCl,
+                    label,
+                    site,
+                  },
+                };
+                const { error } = await supabase.from('plans').insert(row);
+                if (error) throw error;
+                alert('Saved to cloud ✔');
+              } catch (e: any) {
+                alert(e.message || 'Cloud save failed');
+              }
+            }}
+          >
+            Save to Cloud
+          </button>
+        ) : (
+          <a className="btn" href="/login">
+            Sign in to save to cloud
+          </a>
+        )}
+
         <button
           className="btn btn-primary"
           onClick={() => {
@@ -251,7 +295,7 @@ export default function Planner() {
             }
           }}
         >
-          Save Plan
+          Save (Local)
         </button>
 
         <button

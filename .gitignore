@@ -13,3 +13,4 @@ src/.DS_Store
 
 # TypeScript build cache
 *.tsbuildinfo
+.env.local

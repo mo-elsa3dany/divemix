@@ -58,7 +58,7 @@ export default function Mixer() {
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">Gas Mixer</h1>
+      <h1 className="text-2xl font-semibold">Nitrox</h1>
       <p className="text-sm text-zinc-600">Nitrox PP blending helper</p>
 
       <section className="grid grid-cols-2 gap-4">
