@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
-export const runtime = 'nodejs'; // Serverless/Node, not Edge
+export const runtime = 'nodejs'; // Serverless/Node
 export const dynamic = 'force-dynamic'; // no caching
 
 export async function GET(req: NextRequest) {
@@ -33,13 +33,13 @@ export async function GET(req: NextRequest) {
   y -= 6;
   lines.forEach((l) => draw(l, 12));
 
-  // pdf-lib -> Uint8Array
-  const bytes = await pdf.save();
+  // pdf-lib gives Uint8Array; copy to guarantee a plain ArrayBuffer (no SAB union)
+  const bytes = await pdf.save(); // Uint8Array
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  const ab: ArrayBuffer = copy.buffer; // <- definitely ArrayBuffer
 
-  // ✅ TS-safe body: Blob is allowed in Response init
-  const blob = new Blob([bytes], { type: 'application/pdf' });
-
-  return new Response(blob, {
+  return new Response(ab, {
     headers: {
       'Content-Type': 'application/pdf',
       'Content-Disposition': 'attachment; filename="divemix-plan.pdf"',
