@@ -119,3 +119,137 @@ export function ndlAtDepthMinutes(
   }
   return maxMinutes;
 }
+
+export type Stop = { depthM: number; timeMin: number };
+export type Schedule = {
+  stops: Stop[];
+  ascentMin: number;
+  decoMin: number;
+  runtimeMin: number;
+};
+
+/**
+ * Compute a simple ascent schedule (square profile) using ZHL-16C + GF.
+ * - Bottom at depthMeters for bottomMin
+ * - Ascent rate 9 m/min
+ * - Hold at 3 m steps until ceilings clear
+ * - Returns stops & totals (educational only)
+ */
+export function scheduleAscent(
+  depthMeters: number,
+  bottomMin: number,
+  gas: GasComp,
+  gf: GF,
+  initialN2 = 0.79 * 0.933,
+  initialHe = 0,
+): Schedule {
+  const step = 1; // 1-min increments
+  const ascRateMpm = 9; // ascent rate m/min
+  const PH2O = 0.0627;
+
+  // Init tissues at surface, then load at bottom
+  let tN2 = comps.map(() => initialN2);
+  let tHe = comps.map(() => initialHe);
+  const LN2 = Math.log(2);
+
+  function schreiner(p0: number, pinsp: number, half: number, dt: number) {
+    return pinsp + (p0 - pinsp) * Math.exp(-(LN2 / half) * dt);
+  }
+  function inspired(ata: number, g: GasComp) {
+    const amb = Math.max(1, ata);
+    const dry = Math.max(amb - PH2O, 0.1);
+    return { piN2: dry * g.fN2, piHe: dry * g.fHe };
+  }
+  function ceiling(ambAta: number, gff: number) {
+    let maxCeil = 0;
+    for (let i = 0; i < comps.length; i++) {
+      const PN2 = tN2[i],
+        PHe = tHe[i];
+      const sum = PN2 + PHe;
+      const a =
+        sum > 0 ? comps[i].aN2 * (PN2 / sum) + comps[i].aHe * (PHe / sum) : comps[i].aN2;
+      const b =
+        sum > 0 ? comps[i].bN2 * (PN2 / sum) + comps[i].bHe * (PHe / sum) : comps[i].bN2;
+      const allowedAmb = (PN2 + PHe - a * gff) / (b * gff);
+      if (allowedAmb > maxCeil) maxCeil = allowedAmb;
+    }
+    return maxCeil;
+  }
+
+  // Bottom loading
+  {
+    const amb = 1 + depthMeters / 10;
+    const { piN2, piHe } = inspired(amb, gas);
+    for (let t = 0; t < bottomMin; t += step) {
+      for (let i = 0; i < comps.length; i++) {
+        tN2[i] = schreiner(tN2[i], piN2, comps[i].halfN2, step);
+        tHe[i] = schreiner(tHe[i], piHe, comps[i].halfHe, step);
+      }
+    }
+  }
+
+  const stops: Stop[] = [];
+  let decoMin = 0;
+  let ascentMin = 0;
+
+  // Target waypoints every 3 m from current depth down to 0
+  function roundTo3m(d: number) {
+    return Math.max(0, Math.round(d / 3) * 3);
+  }
+  let current = roundTo3m(depthMeters);
+
+  while (current > 0) {
+    // Attempt to ascend one 3 m step (but respect 9 m/min)
+    const next = Math.max(0, current - 3);
+    const segmentHeight = current - next;
+    const segMinutes = Math.max(1, Math.ceil(segmentHeight / ascRateMpm));
+    // try the ascent minute by minute; if ceiling says no → hold stop here instead
+    let blocked = false;
+    for (let m = 0; m < segMinutes; m++) {
+      const amb = 1 + (current - (m + 1) * ascRateMpm) / 10;
+      const gff = gf.high; // conservative for NDL/deco boundary
+      const ceilAmb = ceiling(amb, gff);
+      if (ceilAmb > amb + 1e-6) {
+        blocked = true;
+        break;
+      }
+      // ok to ascend this minute → update tissues at intermediate amb
+      const { piN2, piHe } = inspired(amb, gas);
+      for (let i = 0; i < comps.length; i++) {
+        tN2[i] = schreiner(tN2[i], piN2, comps[i].halfN2, 1);
+        tHe[i] = schreiner(tHe[i], piHe, comps[i].halfHe, 1);
+      }
+      ascentMin += 1;
+    }
+    if (!blocked) {
+      current = next;
+      continue;
+    }
+
+    // Hold at current 3 m stop until ceilings clear enough to continue
+    let held = 0;
+    while (true) {
+      const amb = 1 + current / 10;
+      const gff =
+        current <= 6
+          ? gf.low + ((gf.high - gf.low) * (amb - 1)) / (depthMeters / 10)
+          : gf.high;
+      const ceilAmb = ceiling(amb, gff);
+      if (ceilAmb <= amb + 1e-6 && held > 0) break;
+      const { piN2, piHe } = inspired(amb, gas);
+      for (let i = 0; i < comps.length; i++) {
+        tN2[i] = schreiner(tN2[i], piN2, comps[i].halfN2, 1);
+        tHe[i] = schreiner(tHe[i], piHe, comps[i].halfHe, 1);
+      }
+      held += 1;
+      decoMin += 1;
+      // safety valve
+      if (held > 120) break;
+    }
+    if (held > 0) stops.push({ depthM: current, timeMin: held });
+    // after clearing, go loop to try ascending again
+  }
+
+  const runtimeMin = bottomMin + ascentMin + decoMin;
+  return { stops, ascentMin, decoMin, runtimeMin };
+}

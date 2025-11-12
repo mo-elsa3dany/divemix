@@ -1,4 +1,6 @@
 'use client';
+import { ndlAtDepthMinutes, scheduleAscent } from '@/lib/deco/buhlmann';
+import { gasFromFo2 } from '@/lib/deco/gas';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMemo, useState } from 'react';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
@@ -50,6 +52,10 @@ function toM(units: Units, v: number) {
 
 export default function Planner() {
   const [units, setUnits] = useLocalStorage<Units>('dm_units', 'm');
+  // Tech mode (Bühlmann ZHL-16C + GF)
+  const [tech, setTech] = useState(false);
+  const [gfLo, setGfLo] = useState(30);
+  const [gfHi, setGfHi] = useState(85);
   const [name, setName] = useState<string>('');
   const [dives, setDives] = useState<Dive[]>([
     {
@@ -143,7 +149,7 @@ export default function Planner() {
         overNdL,
       };
     });
-  }, [dives, units]);
+  }, [dives, units, tech, gfLo, gfHi]);
 
   const totals = useMemo(() => {
     return computed.reduce(
