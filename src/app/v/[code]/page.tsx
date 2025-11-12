@@ -1,29 +1,28 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { decodePlan } from '@/lib/utils/share';
 import { mToFt } from '@/lib/calc/gas';
+import { decodePlan } from '@/lib/utils/share';
 
-export default function PublicView({ params }: { params: { code: string } }) {
-  const [plan, setPlan] = useState<any | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+type Params = { code: string };
 
-  useEffect(() => {
-    try {
-      const p = decodePlan<any>(params.code);
-      if (!p) throw new Error('Invalid code');
-      setPlan(p);
-    } catch (e: any) {
-      setErr(e.message || 'Bad link');
-    }
-  }, [params.code]);
+export default async function PublicView({ params }: { params: Promise<Params> }) {
+  const { code } = await params;
+
+  let plan: any | null = null;
+  let err: string | null = null;
+
+  try {
+    plan = decodePlan<any>(code);
+    if (!plan) throw new Error('Invalid code');
+  } catch (e: any) {
+    err = e?.message || 'Bad link';
+  }
 
   if (err) return <main className="card">Link error: {err}</main>;
-  if (!plan) return <main>Loading…</main>;
 
   const depthM =
     plan.units === 'ft'
-      ? Math.round(plan.depthUI / 3.28084)
-      : (plan.depthM ?? plan.depthUI);
+      ? Math.round((plan.depthUI ?? plan.depthM ?? 0) / 3.28084)
+      : (plan.depthM ?? plan.depthUI ?? 0);
+
   return (
     <main className="space-y-4">
       <h1 className="text-2xl font-semibold">Shared Dive Plan</h1>
@@ -42,7 +41,8 @@ export default function PublicView({ params }: { params: { code: string } }) {
           <b>Units:</b> {plan.units}
         </div>
         <div>
-          <b>Depth:</b> {plan.depthUI} {plan.units} ({depthM} m / {mToFt(depthM)} ft)
+          <b>Depth:</b> {plan.depthUI ?? depthM} {plan.units} ({depthM} m /{' '}
+          {mToFt(depthM)} ft)
         </div>
         <div>
           <b>Time:</b> {plan.time} min
@@ -58,7 +58,7 @@ export default function PublicView({ params }: { params: { code: string } }) {
         Open in Planner
       </a>
       <p className="hint">
-        Viewer only. Always verify with training agency and a dive computer.
+        Viewer only. Always verify with a dive computer and agency standards.
       </p>
     </main>
   );
