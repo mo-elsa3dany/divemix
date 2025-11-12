@@ -1,68 +1,83 @@
 'use client';
-
 import { useMemo, useState } from 'react';
-import { clamp, toFloat, toInt } from '@/lib/utils/num';
-import { validateFractions, ppo2AtDepth, modForMix, endMeters } from '@/lib/calc/trimix';
+
+function ftToM(ft: number) {
+  return Math.round(ft / 3.28084);
+}
+function mToFt(m: number) {
+  return Math.round(m * 3.28084);
+}
 
 export default function Trimix() {
-  // UI state
   const [units, setUnits] = useState<'m' | 'ft'>('m');
-  const [depthUI, setDepthUI] = useState(45); // m or ft (based on units)
-  const [fo2PctUI, setFo2PctUI] = useState(21); // %
-  const [fhePctUI, setFhePctUI] = useState(35); // %
-  const [maxPP, setMaxPP] = useState(1.4); // ata
+  const [depthUI, setDepthUI] = useState(60); // 60m / 200ft
+  const [maxPPO2, setMaxPPO2] = useState(1.3); // common PPO2 for tech bottom
+  const [targetEND, setTargetEND] = useState(30); // target END (m) e.g., 30m
+  const [rounding, setRounding] = useState(true);
 
-  // Clamp inputs
-  const depthClamped = clamp(depthUI, 0, units === 'm' ? 120 : Math.round(120 * 3.28084));
-  const fo2Clamped = clamp(fo2PctUI, 8, 40); // allow very low O2 (e.g., Tx10/70)
-  const fheClamped = clamp(fhePctUI, 0, 90);
-  const maxPPClamped = clamp(maxPP, 1.0, 1.6);
+  const depthM = units === 'm' ? depthUI : ftToM(depthUI);
+  const endM = units === 'm' ? targetEND : ftToM(targetEND);
 
-  // Canonical meters for calc
-  const depthM = useMemo(
-    () => (units === 'm' ? depthClamped : Math.round(depthClamped / 3.28084)),
-    [depthClamped, units],
+  // Ambient pressure at depth (ata)
+  const ata = +(depthM / 10 + 1).toFixed(2);
+  const endAta = +(endM / 10 + 1).toFixed(2);
+
+  // O2 fraction from PPO2 constraint
+  const o2FracRaw = Math.min(0.5, Math.max(0.08, +(maxPPO2 / ata)));
+  // N2 fraction from END: (END_ata - 1) / (Depth_ata - 1)
+  const n2FracRaw = Math.max(
+    0,
+    Math.min(0.92, +((endAta - 1) / Math.max(0.0001, ata - 1))),
   );
+  let heFracRaw = 1 - o2FracRaw - n2FracRaw;
 
-  // Validate fractions & get parts
-  const vf = useMemo(
-    () => validateFractions(fo2Clamped, fheClamped),
-    [fo2Clamped, fheClamped],
+  // If infeasible (negative He), clamp and adjust N2
+  if (heFracRaw < 0) {
+    heFracRaw = 0;
+  }
+
+  const toPct = (x: number) => Math.round(x * 100);
+  const o2Pct = rounding
+    ? Math.max(8, Math.min(50, toPct(o2FracRaw)))
+    : (+(o2FracRaw * 100).toFixed(1) as unknown as number);
+  const n2Pct = rounding
+    ? Math.max(0, Math.min(92, toPct(n2FracRaw)))
+    : (+(n2FracRaw * 100).toFixed(1) as unknown as number);
+  let hePct = rounding
+    ? Math.max(0, 100 - o2Pct - n2Pct)
+    : (+(100 - (o2Pct as number) - (n2Pct as number)).toFixed(1) as unknown as number);
+
+  // Derived MOD for that O2 (for reference)
+  const modM = Math.max(
+    0,
+    Math.round(10 * (maxPPO2 / Math.max(0.08, (o2Pct as number) / 100) - 1)),
   );
+  const modFt = mToFt(modM);
 
-  // Calculations
-  const ppo2 = useMemo(() => ppo2AtDepth(depthM, vf.fo2), [depthM, vf.fo2]);
-  const mod = useMemo(() => modForMix(vf.fo2, maxPPClamped), [vf.fo2, maxPPClamped]);
-  const endM = useMemo(() => endMeters(depthM, vf.fo2, vf.fhe), [depthM, vf.fo2, vf.fhe]);
-  const endFt = Math.round(endM * 3.28084);
-  const fn2Pct = Math.round(vf.fn2 * 100);
+  // Feasibility notes
+  const notes: string[] = [];
+  if ((o2Pct as number) < 8) notes.push('O₂ below practical limits.');
+  if ((o2Pct as number) > 50) notes.push('O₂ above safe range for bottom mix.');
+  if ((hePct as number) < 0) notes.push('He went negative; constraints too tight.');
+  if (ata < endAta) notes.push('END deeper than depth (check inputs).');
 
-  // Problems / warnings
-  const errors: string[] = [...vf.errors];
-  const warnings: string[] = [];
-
-  if (ppo2 > maxPPClamped)
-    warnings.push(`PPO₂ ${ppo2.toFixed(2)} exceeds max ${maxPPClamped}.`);
-  if (depthM > mod)
-    warnings.push(`Depth ${depthM} m exceeds MOD ${mod} m for O₂ ${fo2Clamped}%.`);
-  if (vf.fo2 + vf.fhe > 1) errors.push('O₂% + He% must be ≤ 100%.');
-  if (vf.fo2 <= 0) errors.push('O₂% too low.');
-  if (vf.fn2 < 0) errors.push('Negative N₂ fraction (check O₂%/He%).');
+  // Narcotic assumption: N2 narcotic, He non-narcotic, O2 narcotic for END calc is debated; here we tie END only to N2 as a simple MVP.
+  // You can tweak later to treat O2 as narcotic if desired.
 
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">Trimix Planner</h1>
-      <p className="text-sm text-zinc-600">
-        Calculates PPO₂, MOD, and END for Trimix. Educational use only.
+    <main className="space-y-6">
+      <h1 className="text-2xl font-semibold">Trimix (MVP)</h1>
+      <p className="text-sm text-zinc-500">
+        Computes a bottom mix meeting PPO₂ and END targets. Educational use only.
       </p>
 
       <section className="grid grid-cols-2 gap-4">
         <label className="space-y-1">
           <div className="text-sm">Units</div>
           <select
-            className="border rounded p-2"
+            className="select"
             value={units}
-            onChange={(e) => setUnits(e.target.value as 'm' | 'ft')}
+            onChange={(e) => setUnits(e.target.value as any)}
           >
             <option value="m">Meters</option>
             <option value="ft">Feet</option>
@@ -72,93 +87,91 @@ export default function Trimix() {
         <label className="space-y-1">
           <div className="text-sm">{units === 'm' ? 'Depth (m)' : 'Depth (ft)'}</div>
           <input
-            className="border rounded p-2 w-full"
+            className="input"
             type="number"
-            value={depthClamped}
-            onChange={(e) => setDepthUI(toInt(e.target.value, depthClamped))}
-            onBlur={() => setDepthUI(depthClamped)}
+            value={depthUI}
+            onChange={(e) => setDepthUI(+e.target.value || 0)}
           />
-          <div className="text-xs text-zinc-500">
-            {units === 'm'
-              ? `${Math.round(depthClamped * 3.28084)} ft`
-              : `${Math.round(depthClamped / 3.28084)} m`}
+          <div className="hint">
+            {units === 'm' ? `${mToFt(depthUI)} ft` : `${ftToM(depthUI)} m`}
           </div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">O₂ (%)</div>
-          <input
-            className="border rounded p-2 w-full"
-            type="number"
-            value={fo2Clamped}
-            onChange={(e) => setFo2PctUI(toInt(e.target.value, fo2Clamped))}
-          />
-          <div className="text-xs text-zinc-500">Range: 8–40%</div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">He (%)</div>
-          <input
-            className="border rounded p-2 w-full"
-            type="number"
-            value={fheClamped}
-            onChange={(e) => setFhePctUI(toInt(e.target.value, fheClamped))}
-          />
-          <div className="text-xs text-zinc-500">Range: 0–90%</div>
         </label>
 
         <label className="space-y-1">
           <div className="text-sm">Max PPO₂ (ata)</div>
           <select
-            className="border rounded p-2 w-full"
-            value={maxPPClamped}
-            onChange={(e) => setMaxPP(toFloat(e.target.value, maxPPClamped))}
+            className="select"
+            value={maxPPO2}
+            onChange={(e) => setMaxPPO2(+e.target.value)}
           >
             <option value={1.2}>1.2</option>
+            <option value={1.3}>1.3</option>
             <option value={1.4}>1.4</option>
-            <option value={1.6}>1.6</option>
           </select>
         </label>
 
-        <div className="space-y-1">
-          <div className="text-sm">Resulting N₂ (%)</div>
-          <div className="border rounded p-2">{fn2Pct}%</div>
-        </div>
+        <label className="space-y-1">
+          <div className="text-sm">
+            {units === 'm' ? 'Target END (m)' : 'Target END (ft)'}
+          </div>
+          <input
+            className="input"
+            type="number"
+            value={targetEND}
+            onChange={(e) => setTargetEND(+e.target.value || 0)}
+          />
+          <div className="hint">Common: 30–40 m (100–130 ft)</div>
+        </label>
+
+        <label className="space-y-1">
+          <div className="text-sm">Round to whole %</div>
+          <select
+            className="select"
+            value={rounding ? 'yes' : 'no'}
+            onChange={(e) => setRounding(e.target.value === 'yes')}
+          >
+            <option value="yes">Yes (fill-friendly)</option>
+            <option value="no">No (precise)</option>
+          </select>
+        </label>
       </section>
 
-      {!!errors.length && (
-        <div className="border border-red-500 bg-red-900/40 rounded p-3">
-          <div className="font-medium mb-1">Input errors</div>
+      {!!notes.length && (
+        <div className="alert-warn">
+          <div className="font-medium mb-1">Notes</div>
           <ul className="list-disc ml-5 text-sm">
-            {errors.map((w, i) => (
+            {notes.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
           </ul>
         </div>
       )}
 
-      <section className="rounded border p-4 space-y-2">
+      <section className="card space-y-2">
         <div>
-          <b>PPO₂ @ depth:</b> {ppo2.toFixed(2)} ata
+          <b>Ambient @ depth:</b> {ata} ata
         </div>
         <div>
-          <b>MOD @ PPO₂ {maxPPClamped}:</b> {mod} m ({Math.round(mod * 3.28084)} ft)
+          <b>Derived O₂ for PPO₂ {maxPPO2}:</b> {o2Pct}%
         </div>
         <div>
-          <b>END:</b> {endM} m ({endFt} ft)
+          <b>Derived N₂ for END {endM} m:</b> {n2Pct}%
+        </div>
+        <div>
+          <b>Helium (computed):</b> {hePct}%
+        </div>
+        <div>
+          <b>
+            MOD (for O₂ {o2Pct}% @ PPO₂ {maxPPO2}):
+          </b>{' '}
+          {modM} m / {modFt} ft
         </div>
       </section>
 
-      {!!warnings.length && (
-        <div className="border border-amber-500 bg-amber-900/40 rounded p-3">
-          <div className="font-medium mb-1">Warnings</div>
-          <ul className="list-disc ml-5 text-sm">
-            {warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <p className="hint">
+        Assumptions: N₂ narcotic; He non-narcotic; O₂ not counted toward END in this MVP.
+        Always analyze and label cylinders.
+      </p>
     </main>
   );
 }
