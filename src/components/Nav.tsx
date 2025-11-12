@@ -1,14 +1,14 @@
 'use client';
-
 import { usePathname } from 'next/navigation';
 
 const links = [
   { href: '/', label: 'DiveMix' },
   { href: '/planner', label: 'Planner' },
-  { href: '/mixer', label: 'Mixer' },
+  { href: '/nitrox', label: 'Nitrox' },
   { href: '/trimix', label: 'Trimix' },
   { href: '/saved', label: 'Saved' },
   { href: '/pricing', label: 'Pricing' },
+  { href: '/status', label: 'Status' },
 ];
 
 export default function Nav() {
