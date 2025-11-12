@@ -338,16 +338,34 @@ export default function Planner() {
           Export .json
         </button>
 
+        {/* Existing Share Link (planner?p=...) */}
         <button
           className="btn"
           onClick={async () => {
             const code = encodePlan(payload);
             const url = `${location.origin}/planner?p=${code}`;
             const ok = await copy(url);
-            alert(ok ? 'Share link copied to clipboard' : url);
+            alert(ok ? 'Share link copied' : url);
           }}
         >
           Share Link
+        </button>
+
+        {/* New: Copy Public Link (/v/<code>) */}
+        <button
+          className="btn"
+          onClick={async () => {
+            try {
+              const code = encodePlan(payload);
+              const url = `${location.origin}/v/${code}`;
+              const ok = await copy(url);
+              alert(ok ? 'Public viewer link copied' : url);
+            } catch {
+              alert('Could not create public link');
+            }
+          }}
+        >
+          Copy Public Link
         </button>
 
         <a href="/saved" className="underline self-center">
