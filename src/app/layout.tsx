@@ -33,6 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </Link>
           <nav className="ml-auto flex items-center gap-4 text-sm">
             <Link href="/planner" className="hover:underline">
+              <a href="/saved" className="nav-link">
+                Saved
+              </a>
               Planner
             </Link>
             <Link href="/nitrox" className="hover:underline">
