@@ -240,7 +240,6 @@ export default function PlannerPage() {
   return (
     <main className="container max-w-5xl mx-auto p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Planner (Multi-Dive · EANx)</h1>
-
       <section className="card space-y-3">
         <div className="flex gap-3 items-center">
           <label className="flex items-center gap-2">
@@ -288,7 +287,6 @@ export default function PlannerPage() {
           </button>
         </div>
       </section>
-
       <div className="space-y-4">
         {computed.map((d, idx) => (
           <section key={idx} className="card space-y-3">
@@ -436,7 +434,6 @@ export default function PlannerPage() {
           </section>
         ))}
       </div>
-
       <div className="flex gap-2">
         <button className="btn" onClick={saveLocal}>
           Save
@@ -448,10 +445,8 @@ export default function PlannerPage() {
           Copy Public Link
         </button>
       </div>
-
       {/* If your project includes an ExportPanel component, this will work. Otherwise it's a no-op visual reference. */}
-      {/* @ts-expect-error - ExportPanel may be globally available in your project; if not, remove this line. */}
-      <ExportPanel title="Multi-Dive Plan" row={dataPayload()} />
+      {/* <ExportPanel title="Multi-Dive Plan" row={dataPayload()} /> */}{' '}
     </main>
   );
 }
