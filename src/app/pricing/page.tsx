@@ -1,8 +1,57 @@
+'use client';
+import { useState } from 'react';
+import { supabase } from '@/lib/supabase/client';
+
 export default function Pricing() {
+  const [email, setEmail] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function join() {
+    if (!email.includes('@')) {
+      setMsg('Enter a valid email.');
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const { error } = await supabase.from('waitlist').insert({ email });
+      if (error) {
+        if ((error.message || '').toLowerCase().includes('duplicate'))
+          setMsg('You’re already on the list. 👍');
+        else throw error;
+      } else {
+        setMsg('All set — we’ll email you when Pro opens.');
+        setEmail('');
+      }
+    } catch (e: any) {
+      setMsg(e.message || 'Could not join. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <main className="mx-auto max-w-3xl p-8 space-y-3">
+    <main className="space-y-6">
       <h1 className="text-2xl font-semibold">Pricing</h1>
-      <p>Free for now. Plus tier coming soon.</p>
+      <div className="card space-y-3">
+        <p className="text-sm text-zinc-400">
+          Free: Planner + Nitrox. Pro soon: cloud presets, share gallery, export packs,
+          and more.
+        </p>
+        <div className="grid gap-2 max-w-md">
+          <input
+            className="input"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <button className="btn btn-primary" disabled={busy} onClick={join}>
+            {busy ? 'Adding…' : 'Join waitlist'}
+          </button>
+          {msg && <div className="hint">{msg}</div>}
+        </div>
+      </div>
     </main>
   );
 }
