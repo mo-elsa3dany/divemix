@@ -1,5 +1,6 @@
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 /* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+('use client');
 import { useMemo, useState } from 'react';
 
 function ftToM(ft: number) {

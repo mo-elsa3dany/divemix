@@ -1,5 +1,6 @@
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 /* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+('use client');
 
 import { useEffect, useMemo, useState } from 'react';
 import { ppO2, modMeters, gasUsedLiters, mToFt } from '@/lib/calc/gas';

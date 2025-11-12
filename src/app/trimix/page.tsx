@@ -1,7 +1,7 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { cnsPercent, otu, ambientAtaFromMeters } from '@/lib/calc/cns';
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 
 function ftToM(ft: number) {
   return Math.round(ft / 3.28084);
@@ -10,24 +10,35 @@ function mToFt(m: number) {
   return Math.round(m * 3.28084);
 }
 
+type RoundMode = 'whole' | 'half' | 'exact';
+const roundModeLabel = {
+  whole: 'Yes (fill-friendly)',
+  half: '0.5% steps',
+  exact: 'No (precise)',
+};
+
+function roundPct(x: number, mode: RoundMode) {
+  if (mode === 'exact') return +(x * 100).toFixed(1);
+  const raw = x * 100;
+  if (mode === 'half') return Math.max(0, Math.min(100, Math.round(raw * 2) / 2));
+  return Math.max(0, Math.min(100, Math.round(raw)));
+}
+
 export default function Trimix() {
-  const [units, setUnits] = useState<'m' | 'ft'>('m');
-  const [depthUI, setDepthUI] = useState(60); // 60m / 200ft
-  const [maxPPO2, setMaxPPO2] = useState(1.3); // common PPO2 for tech bottom
-  const [targetEND, setTargetEND] = useState(30); // target END (m) e.g., 30m
-  const [bottomTime, setBottomTime] = useState(20); // minutes at depth
-  const [rounding, setRounding] = useState(true);
+  const [units, setUnits] = useLocalStorage<'m' | 'ft'>('dm_units', 'm');
+  const [depthUI, setDepthUI] = useState(60);
+  const [maxPPO2, setMaxPPO2] = useState(1.3);
+  const [targetEND, setTargetEND] = useState(30);
+  const [bottomTime, setBottomTime] = useState(20);
+  const [mode, setMode] = useState<RoundMode>('whole');
 
   const depthM = units === 'm' ? depthUI : ftToM(depthUI);
   const endM = units === 'm' ? targetEND : ftToM(targetEND);
 
-  // Ambient pressures
   const ata = ambientAtaFromMeters(depthM);
   const endAta = ambientAtaFromMeters(endM);
 
-  // O2 fraction from PPO2 constraint
   const o2FracRaw = Math.min(0.5, Math.max(0.08, +(maxPPO2 / ata)));
-  // N2 fraction from END: (END_ata - 1) / (Depth_ata - 1)
   const n2FracRaw = Math.max(
     0,
     Math.min(0.92, +((endAta - 1) / Math.max(0.0001, ata - 1))),
@@ -35,32 +46,23 @@ export default function Trimix() {
   let heFracRaw = 1 - o2FracRaw - n2FracRaw;
   if (heFracRaw < 0) heFracRaw = 0;
 
-  const toPct = (x: number) => Math.round(x * 100);
-  const o2Pct = rounding
-    ? Math.max(8, Math.min(50, toPct(o2FracRaw)))
-    : (+(o2FracRaw * 100).toFixed(1) as unknown as number);
-  const n2Pct = rounding
-    ? Math.max(0, Math.min(92, toPct(n2FracRaw)))
-    : (+(n2FracRaw * 100).toFixed(1) as unknown as number);
-  const hePct = rounding
-    ? Math.max(0, 100 - (o2Pct as number) - (n2Pct as number))
-    : (+(100 - (o2Pct as number) - (n2Pct as number)).toFixed(1) as unknown as number);
+  const o2Pct = roundPct(o2FracRaw, mode);
+  const n2Pct = roundPct(n2FracRaw, mode);
+  const hePct = Math.max(
+    0,
+    +(100 - (o2Pct as number) - (n2Pct as number)).toFixed(mode === 'exact' ? 1 : 0),
+  );
 
-  // PPO2 at depth for this mix
   const po2AtDepth = +(((o2Pct as number) / 100) * ata).toFixed(2);
-
-  // Derived MOD for that O2 (for reference)
   const modM = Math.max(
     0,
     Math.round(10 * (maxPPO2 / Math.max(0.08, (o2Pct as number) / 100) - 1)),
   );
   const modFt = mToFt(modM);
 
-  // CNS/OTU at depth for bottom segment
   const cns = cnsPercent(po2AtDepth, bottomTime);
   const otus = otu(po2AtDepth, bottomTime);
 
-  // Warnings
   const warns: string[] = [];
   if (po2AtDepth > 1.6) warns.push(`PPO₂ ${po2AtDepth} ata exceeds 1.6 (abort).`);
   else if (po2AtDepth > 1.4)
@@ -70,10 +72,9 @@ export default function Trimix() {
 
   return (
     <main className="space-y-6">
-      <h1 className="text-2xl font-semibold">Trimix (MVP+Safety)</h1>
+      <h1 className="text-2xl font-semibold">Trimix</h1>
       <p className="text-sm text-zinc-500">
-        Computes a bottom mix meeting PPO₂ and END targets, with CNS% and OTU estimate.
-        Educational use only.
+        Bottom mix meeting PPO₂ and END targets, with CNS% and OTU. Educational use only.
       </p>
 
       <section className="grid grid-cols-2 gap-4">
@@ -140,14 +141,15 @@ export default function Trimix() {
         </label>
 
         <label className="space-y-1">
-          <div className="text-sm">Round to whole %</div>
+          <div className="text-sm">Round mix to</div>
           <select
             className="select"
-            value={rounding ? 'yes' : 'no'}
-            onChange={(e) => setRounding(e.target.value === 'yes')}
+            value={mode}
+            onChange={(e) => setMode(e.target.value as RoundMode)}
           >
-            <option value="yes">Yes (fill-friendly)</option>
-            <option value="no">No (precise)</option>
+            <option value="whole">{roundModeLabel.whole}</option>
+            <option value="half">{roundModeLabel.half}</option>
+            <option value="exact">{roundModeLabel.exact}</option>
           </select>
         </label>
       </section>
@@ -200,11 +202,6 @@ export default function Trimix() {
           × minutes.
         </p>
       </section>
-
-      <p className="hint">
-        Assumptions: N₂ narcotic; He non-narcotic; O₂ not counted toward END in this MVP.
-        Always analyze and label cylinders.
-      </p>
     </main>
   );
 }
