@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
+import { cnsPercent, otu, ambientAtaFromMeters } from '@/lib/calc/cns';
 
 function ftToM(ft: number) {
   return Math.round(ft / 3.28084);
@@ -13,14 +15,15 @@ export default function Trimix() {
   const [depthUI, setDepthUI] = useState(60); // 60m / 200ft
   const [maxPPO2, setMaxPPO2] = useState(1.3); // common PPO2 for tech bottom
   const [targetEND, setTargetEND] = useState(30); // target END (m) e.g., 30m
+  const [bottomTime, setBottomTime] = useState(20); // minutes at depth
   const [rounding, setRounding] = useState(true);
 
   const depthM = units === 'm' ? depthUI : ftToM(depthUI);
   const endM = units === 'm' ? targetEND : ftToM(targetEND);
 
-  // Ambient pressure at depth (ata)
-  const ata = +(depthM / 10 + 1).toFixed(2);
-  const endAta = +(endM / 10 + 1).toFixed(2);
+  // Ambient pressures
+  const ata = ambientAtaFromMeters(depthM);
+  const endAta = ambientAtaFromMeters(endM);
 
   // O2 fraction from PPO2 constraint
   const o2FracRaw = Math.min(0.5, Math.max(0.08, +(maxPPO2 / ata)));
@@ -30,11 +33,7 @@ export default function Trimix() {
     Math.min(0.92, +((endAta - 1) / Math.max(0.0001, ata - 1))),
   );
   let heFracRaw = 1 - o2FracRaw - n2FracRaw;
-
-  // If infeasible (negative He), clamp and adjust N2
-  if (heFracRaw < 0) {
-    heFracRaw = 0;
-  }
+  if (heFracRaw < 0) heFracRaw = 0;
 
   const toPct = (x: number) => Math.round(x * 100);
   const o2Pct = rounding
@@ -43,9 +42,12 @@ export default function Trimix() {
   const n2Pct = rounding
     ? Math.max(0, Math.min(92, toPct(n2FracRaw)))
     : (+(n2FracRaw * 100).toFixed(1) as unknown as number);
-  let hePct = rounding
-    ? Math.max(0, 100 - o2Pct - n2Pct)
+  const hePct = rounding
+    ? Math.max(0, 100 - (o2Pct as number) - (n2Pct as number))
     : (+(100 - (o2Pct as number) - (n2Pct as number)).toFixed(1) as unknown as number);
+
+  // PPO2 at depth for this mix
+  const po2AtDepth = +(((o2Pct as number) / 100) * ata).toFixed(2);
 
   // Derived MOD for that O2 (for reference)
   const modM = Math.max(
@@ -54,21 +56,24 @@ export default function Trimix() {
   );
   const modFt = mToFt(modM);
 
-  // Feasibility notes
-  const notes: string[] = [];
-  if ((o2Pct as number) < 8) notes.push('O₂ below practical limits.');
-  if ((o2Pct as number) > 50) notes.push('O₂ above safe range for bottom mix.');
-  if ((hePct as number) < 0) notes.push('He went negative; constraints too tight.');
-  if (ata < endAta) notes.push('END deeper than depth (check inputs).');
+  // CNS/OTU at depth for bottom segment
+  const cns = cnsPercent(po2AtDepth, bottomTime);
+  const otus = otu(po2AtDepth, bottomTime);
 
-  // Narcotic assumption: N2 narcotic, He non-narcotic, O2 narcotic for END calc is debated; here we tie END only to N2 as a simple MVP.
-  // You can tweak later to treat O2 as narcotic if desired.
+  // Warnings
+  const warns: string[] = [];
+  if (po2AtDepth > 1.6) warns.push(`PPO₂ ${po2AtDepth} ata exceeds 1.6 (abort).`);
+  else if (po2AtDepth > 1.4)
+    warns.push(`PPO₂ ${po2AtDepth} ata above 1.4 working limit (contingency only).`);
+  if (cns >= 100) warns.push(`CNS ${cns}% exceeds 100%.`);
+  else if (cns >= 80) warns.push(`CNS ${cns}% high (≥80%).`);
 
   return (
     <main className="space-y-6">
-      <h1 className="text-2xl font-semibold">Trimix (MVP)</h1>
+      <h1 className="text-2xl font-semibold">Trimix (MVP+Safety)</h1>
       <p className="text-sm text-zinc-500">
-        Computes a bottom mix meeting PPO₂ and END targets. Educational use only.
+        Computes a bottom mix meeting PPO₂ and END targets, with CNS% and OTU estimate.
+        Educational use only.
       </p>
 
       <section className="grid grid-cols-2 gap-4">
@@ -124,6 +129,17 @@ export default function Trimix() {
         </label>
 
         <label className="space-y-1">
+          <div className="text-sm">Bottom Time (min)</div>
+          <input
+            className="input"
+            type="number"
+            value={bottomTime}
+            onChange={(e) => setBottomTime(+e.target.value || 0)}
+          />
+          <div className="hint">Used for CNS% and OTU at depth</div>
+        </label>
+
+        <label className="space-y-1">
           <div className="text-sm">Round to whole %</div>
           <select
             className="select"
@@ -136,11 +152,11 @@ export default function Trimix() {
         </label>
       </section>
 
-      {!!notes.length && (
-        <div className="alert-warn">
-          <div className="font-medium mb-1">Notes</div>
+      {!!warns.length && (
+        <div className="alert-error">
+          <div className="font-medium mb-1">Warnings</div>
           <ul className="list-disc ml-5 text-sm">
-            {notes.map((w, i) => (
+            {warns.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
           </ul>
@@ -150,6 +166,9 @@ export default function Trimix() {
       <section className="card space-y-2">
         <div>
           <b>Ambient @ depth:</b> {ata} ata
+        </div>
+        <div>
+          <b>PPO₂ @ depth:</b> {po2AtDepth} ata (working ≤1.4, contingency ≤1.6)
         </div>
         <div>
           <b>Derived O₂ for PPO₂ {maxPPO2}:</b> {o2Pct}%
@@ -166,6 +185,20 @@ export default function Trimix() {
           </b>{' '}
           {modM} m / {modFt} ft
         </div>
+      </section>
+
+      <section className="card space-y-2">
+        <div className="font-medium">Oxygen Exposure (bottom segment)</div>
+        <div>
+          <b>CNS%:</b> {cns}%
+        </div>
+        <div>
+          <b>OTU:</b> {otus}
+        </div>
+        <p className="hint">
+          CNS based on NOAA single-exposure limits (interpolated). OTU ≈ (PO₂ - 0.5)^0.83
+          × minutes.
+        </p>
       </section>
 
       <p className="hint">

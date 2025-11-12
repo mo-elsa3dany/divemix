@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { ppO2, modMeters, gasUsedLiters, mToFt } from '@/lib/calc/gas';
 import { clamp, toInt, toFloat } from '@/lib/utils/num';
-import { cnsPercent, otus } from '@/lib/calc/cns';
+import { cnsPercent, otu } from '@/lib/calc/cns';
 import { downloadJSON, downloadText } from '@/lib/utils/export';
 import { encodePlan, decodePlan, copy } from '@/lib/utils/share';
 import { useSupabaseAuth } from '@/lib/supabase/useAuth';
@@ -40,7 +41,7 @@ export default function Planner() {
     [sacCl, timeCl, depthM],
   );
   const cns = useMemo(() => cnsPercent(ppo2, timeCl), [ppo2, timeCl]);
-  const otu = useMemo(() => otus(ppo2, timeCl), [ppo2, timeCl]);
+  const otuScore = useMemo(() => otu(ppo2, timeCl), [ppo2, timeCl]);
 
   useEffect(() => {
     try {
@@ -216,7 +217,7 @@ export default function Planner() {
             <b>CNS%:</b> {cns}%
           </div>
           <div>
-            <b>OTU:</b> {otu}
+            <b>OTU:</b> {otuScore}
           </div>
         </div>
       </section>
@@ -314,7 +315,7 @@ export default function Planner() {
               `PPO2: ${ppo2.toFixed(2)} ata`,
               `MOD: ${mod} m (${Math.round(mod * 3.28084)} ft)`,
               `Gas used: ${gasL} L`,
-              `CNS: ${cns}% | OTU: ${otu}`,
+              `CNS: ${cns}% | OTU: ${otuScore}`,
             ]
               .filter(Boolean)
               .join('\n');

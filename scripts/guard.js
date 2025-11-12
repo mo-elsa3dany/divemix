@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /* Fail the commit if junk files or heredoc markers slipped in */
 const fs = require('fs');
 const path = require('path');
