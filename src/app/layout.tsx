@@ -1,27 +1,22 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import Nav from '@/components/Nav';
 
 export const metadata: Metadata = {
   title: 'DiveMix — Dive Planner & Gas Mixer',
-  description:
-    'Free, fast dive planner (NDL/MOD/PPO₂) and nitrox gas mixer. Educational use.',
+  description: 'Plan dives, build gas mixes, Trimix tools. Educational use only.',
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <header className="max-w-3xl mx-auto p-4 flex gap-4">
-          <a href="/">DiveMix</a>
-          <a href="/planner">Planner</a>
-          <a href="/mixer">Mixer</a>
-          <a href="/trimix">Trimix</a>
-          <a href="/saved">Saved</a>
-          <a href="/pricing">Pricing</a>
-        </header>
-        {children}
+        <Nav />
+        <div className="container-page">{children}</div>
+        <footer className="mx-auto max-w-3xl px-6 pb-10 pt-6 text-xs text-zinc-500">
+          Disclaimer: Educational planning tool. Not a substitute for formal training or a
+          dive computer.
+        </footer>
       </body>
     </html>
   );

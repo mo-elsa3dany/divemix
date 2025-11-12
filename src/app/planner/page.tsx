@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { ppO2, modMeters, gasUsedLiters, mToFt } from '@/lib/calc/gas';
 import { clamp, toInt, toFloat } from '@/lib/utils/num';
 import { cnsPercent, otus } from '@/lib/calc/cns';
+import { downloadJSON, downloadText } from '@/lib/utils/export';
 
 export default function Planner() {
   const [units, setUnits] = useState<'m' | 'ft'>('m');
@@ -49,7 +50,7 @@ export default function Planner() {
   if (cns >= 100) errors.push(`CNS ${cns}% (exceeds 100%)`);
 
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-6">
+    <main className="space-y-6">
       <h1 className="text-2xl font-semibold">Dive Planner</h1>
       <p className="text-sm text-zinc-600">
         Educational tool. Not a substitute for formal training or a dive computer.
@@ -59,7 +60,7 @@ export default function Planner() {
         <label className="space-y-1">
           <div className="text-sm">Units</div>
           <select
-            className="border rounded p-2"
+            className="select"
             value={units}
             onChange={(e) => setUnits(e.target.value as 'm' | 'ft')}
           >
@@ -71,13 +72,13 @@ export default function Planner() {
         <label className="space-y-1">
           <div className="text-sm">{units === 'm' ? 'Depth (m)' : 'Depth (ft)'}</div>
           <input
-            className="border rounded p-2 w-full"
+            className="input"
             type="number"
             value={depthUI}
             onChange={(e) => setDepthInUI(toInt(e.target.value, depthUI))}
             onBlur={() => setDepthInUI(depthUI)}
           />
-          <div className="text-xs text-zinc-500">
+          <div className="hint">
             {units === 'm'
               ? `${mToFt(depthUI)} ft`
               : `${Math.round(depthUI / 3.28084)} m`}
@@ -87,29 +88,29 @@ export default function Planner() {
         <label className="space-y-1">
           <div className="text-sm">Bottom Time (min)</div>
           <input
-            className="border rounded p-2 w-full"
+            className="input"
             type="number"
             value={timeCl}
             onChange={(e) => setTime(toInt(e.target.value, timeCl))}
           />
-          <div className="text-xs text-zinc-500">Range: 1–300</div>
+          <div className="hint">Range: 1–300</div>
         </label>
 
         <label className="space-y-1">
           <div className="text-sm">FO₂ (%)</div>
           <input
-            className="border rounded p-2 w-full"
+            className="input"
             type="number"
             value={fo2Cl}
             onChange={(e) => setFo2Pct(toInt(e.target.value, fo2Cl))}
           />
-          <div className="text-xs text-zinc-500">Range: 21–40</div>
+          <div className="hint">Range: 21–40</div>
         </label>
 
         <label className="space-y-1">
           <div className="text-sm">Max PPO₂</div>
           <select
-            className="border rounded p-2 w-full"
+            className="select"
             value={ppCl}
             onChange={(e) => setTargetPp(toFloat(e.target.value, ppCl))}
           >
@@ -122,17 +123,17 @@ export default function Planner() {
         <label className="space-y-1">
           <div className="text-sm">SAC (L/min)</div>
           <input
-            className="border rounded p-2 w-full"
+            className="input"
             type="number"
             value={sacCl}
             onChange={(e) => setSac(toInt(e.target.value, sacCl))}
           />
-          <div className="text-xs text-zinc-500">Typical: 8–30</div>
+          <div className="hint">Typical: 8–30</div>
         </label>
       </section>
 
       {!!errors.length && (
-        <div className="border border-red-500 bg-red-900/40 rounded p-3">
+        <div className="alert-error">
           <div className="font-medium mb-1">Input errors</div>
           <ul className="list-disc ml-5 text-sm">
             {errors.map((w, i) => (
@@ -142,7 +143,7 @@ export default function Planner() {
         </div>
       )}
 
-      <section className="rounded border p-4 space-y-2">
+      <section className="card space-y-2">
         <div>
           <b>PPO₂ @ depth:</b> {ppo2.toFixed(2)} ata
         </div>
@@ -163,7 +164,7 @@ export default function Planner() {
       </section>
 
       {!!warnings.length && (
-        <div className="border border-amber-500 bg-amber-900/40 rounded p-3">
+        <div className="alert-warn">
           <div className="font-medium mb-1">Warnings</div>
           <ul className="list-disc ml-5 text-sm">
             {warnings.map((w, i) => (
@@ -173,8 +174,9 @@ export default function Planner() {
         </div>
       )}
 
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
         <button
+          className="btn btn-primary"
           onClick={() => {
             const entry = {
               ts: Date.now(),
@@ -197,10 +199,52 @@ export default function Planner() {
               alert('Could not save plan.');
             }
           }}
-          className="border rounded px-4 py-2"
         >
           Save Plan
         </button>
+
+        <button
+          className="btn"
+          onClick={() => {
+            const txt = [
+              `Dive Plan @ ${new Date().toLocaleString()}`,
+              `Units: ${units}`,
+              `Depth: ${depthUI} ${units} (${depthM} m)`,
+              `Time: ${timeCl} min`,
+              `FO2: ${fo2Cl}%  | Max PPO2: ${ppCl}`,
+              `SAC: ${sacCl} L/min`,
+              `--- Results ---`,
+              `PPO2: ${ppo2.toFixed(2)} ata`,
+              `MOD: ${mod} m (${Math.round(mod * 3.28084)} ft)`,
+              `Gas used: ${gasL} L`,
+              `CNS: ${cns}% | OTU: ${otu}`,
+            ].join('\n');
+            downloadText('divemix-plan.txt', txt);
+          }}
+        >
+          Export .txt
+        </button>
+
+        <button
+          className="btn"
+          onClick={() => {
+            const payload = {
+              ts: Date.now(),
+              units,
+              depthUI,
+              depthM,
+              time: timeCl,
+              fo2Pct: fo2Cl,
+              targetPp: ppCl,
+              sac: sacCl,
+              result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
+            };
+            downloadJSON('divemix-plan.json', payload);
+          }}
+        >
+          Export .json
+        </button>
+
         <a href="/saved" className="underline self-center">
           View Saved
         </a>

@@ -11,7 +11,7 @@ type Plan = {
   fo2Pct: number;
   targetPp: number;
   sac: number;
-  result: { ppo2: number; mod: number; gas: number };
+  result: { ppo2: number; mod: number; gas: number; cns?: number; otu?: number };
 };
 
 const KEY = 'divemix_plans';
@@ -49,13 +49,35 @@ export default function Saved() {
     }
   }
 
+  function exportAll() {
+    try {
+      const raw = localStorage.getItem(KEY) || '[]';
+      const data = JSON.parse(raw);
+      const txt = JSON.stringify(data, null, 2);
+      const blob = new Blob([txt], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'divemix-plans.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Export failed');
+    }
+  }
+
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-4">
+    <main className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Saved Plans</h1>
-        <button onClick={clearAll} className="border rounded px-3 py-1 text-sm">
-          Clear All
-        </button>
+        <div className="flex gap-2">
+          <button onClick={exportAll} className="btn">
+            Export All (.json)
+          </button>
+          <button onClick={clearAll} className="btn">
+            Clear All
+          </button>
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -65,22 +87,16 @@ export default function Saved() {
       ) : (
         <ul className="space-y-3">
           {items.map((p) => (
-            <li key={p.ts} className="border rounded p-3">
+            <li key={p.ts} className="card">
               <div className="flex items-center justify-between">
                 <div className="text-xs text-zinc-500">
                   {new Date(p.ts).toLocaleString()}
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    className="border rounded px-2 py-1 text-sm"
-                    onClick={() => loadInPlanner(p)}
-                  >
+                  <button className="btn" onClick={() => loadInPlanner(p)}>
                     Load in Planner
                   </button>
-                  <button
-                    className="border rounded px-2 py-1 text-sm"
-                    onClick={() => remove(p.ts)}
-                  >
+                  <button className="btn" onClick={() => remove(p.ts)}>
                     Delete
                   </button>
                 </div>
@@ -89,6 +105,12 @@ export default function Saved() {
                 Depth: <b>{p.depthM} m</b> · Time: <b>{p.time} min</b> · FO₂{' '}
                 <b>{p.fo2Pct}%</b> · PPO₂ <b>{p.result.ppo2}</b> · MOD{' '}
                 <b>{p.result.mod} m</b> · Gas <b>{p.result.gas} L</b>
+                {typeof p.result.cns === 'number' || typeof p.result.otu === 'number' ? (
+                  <>
+                    {' '}
+                    · CNS <b>{p.result.cns ?? '-'}%</b> · OTU <b>{p.result.otu ?? '-'}</b>
+                  </>
+                ) : null}
               </div>
             </li>
           ))}

@@ -24,3 +24,50 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ==== UI pass additions ==== */
+@layer base {
+  body {
+    @apply bg-zinc-950 text-zinc-100;
+  }
+  a {
+    @apply underline decoration-zinc-500/50 underline-offset-4 hover:decoration-zinc-300;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto max-w-3xl px-6 py-8;
+  }
+  .nav-wrap {
+    @apply mx-auto max-w-5xl px-6 py-4 flex items-center gap-6;
+  }
+  .nav-link {
+    @apply no-underline text-zinc-300 hover:text-zinc-100;
+  }
+  .nav-link-active {
+    @apply no-underline text-zinc-100 font-medium border-b border-zinc-500/60;
+  }
+  .card {
+    @apply rounded border border-zinc-800 bg-zinc-900/40 p-4;
+  }
+  .alert-error {
+    @apply border border-red-500 bg-red-900/40 rounded p-3;
+  }
+  .alert-warn {
+    @apply border border-amber-500 bg-amber-900/40 rounded p-3;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded border border-zinc-700 bg-zinc-900/60 px-4 py-2 text-sm hover:bg-zinc-800;
+  }
+  .btn-primary {
+    @apply border-indigo-500 bg-indigo-600/20 hover:bg-indigo-600/30;
+  }
+  .input,
+  .select {
+    @apply w-full rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2;
+  }
+  .hint {
+    @apply text-xs text-zinc-500;
+  }
+}
