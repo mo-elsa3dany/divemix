@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import ExportPanel from '../../components/ExportPanel';
 
 // ---------- Types ----------
 type Units = 'm' | 'ft';
@@ -175,7 +176,7 @@ export default function PlannerPage() {
     });
   }, [dives, units, tech, gfLo, gfHi]);
 
-  // ----- Export / Save stubs (compatible names) -----
+  // ----- Export / Save helpers -----
   const dataPayload = () => {
     const d = computed[0];
     if (!d) return {};
@@ -212,6 +213,7 @@ export default function PlannerPage() {
 
   const saveCloud = async () => {
     try {
+      // stub for now; we’ll wire Supabase later
       await Promise.resolve();
       alert('Saved to cloud (stub)');
     } catch {
@@ -240,6 +242,7 @@ export default function PlannerPage() {
   return (
     <main className="container max-w-5xl mx-auto p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Planner (Multi-Dive · EANx)</h1>
+
       <section className="card space-y-3">
         <div className="flex gap-3 items-center">
           <label className="flex items-center gap-2">
@@ -287,6 +290,7 @@ export default function PlannerPage() {
           </button>
         </div>
       </section>
+
       <div className="space-y-4">
         {computed.map((d, idx) => (
           <section key={idx} className="card space-y-3">
@@ -434,7 +438,9 @@ export default function PlannerPage() {
           </section>
         ))}
       </div>
-      <div className="flex gap-2">
+
+      {/* Actions */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button className="btn" onClick={saveLocal}>
           Save
         </button>
@@ -444,9 +450,8 @@ export default function PlannerPage() {
         <button className="btn" onClick={copyPublicLink}>
           Copy Public Link
         </button>
+        <ExportPanel title="Multi-Dive Plan" row={dataPayload()} />
       </div>
-      {/* If your project includes an ExportPanel component, this will work. Otherwise it's a no-op visual reference. */}
-      {/* <ExportPanel title="Multi-Dive Plan" row={dataPayload()} /> */}{' '}
     </main>
   );
 }
