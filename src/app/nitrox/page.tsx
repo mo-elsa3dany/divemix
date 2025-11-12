@@ -1,5 +1,5 @@
+'use client';
 import ExportPanel from '@/components/ExportPanel';
-('use client');
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMemo, useState } from 'react';

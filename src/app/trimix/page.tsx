@@ -1,5 +1,5 @@
+'use client';
 import ExportPanel from '@/components/ExportPanel';
-('use client');
 import { useState } from 'react';
 import { cnsPercent, otu, ambientAtaFromMeters } from '@/lib/calc/cns';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
