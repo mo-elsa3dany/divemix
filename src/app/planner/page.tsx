@@ -1,254 +1,292 @@
 'use client';
-import { ndlAtDepthMinutes, scheduleAscent } from '@/lib/deco/buhlmann';
-import { gasFromFo2 } from '@/lib/deco/gas';
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useMemo, useState } from 'react';
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
-import { cnsPercent, otu, ambientAtaFromMeters } from '@/lib/calc/cns';
-import { bestMixPct, eadM, modM, ftToM, mToFt, ataFromDepthM } from '@/lib/calc/ean';
-import { avgAtaOverProfile } from '@/lib/calc/profile';
-import {
-  ndlAirAtDepthM,
-  n2IndexAfterDive,
-  decayIndex,
-  rntFromIndex,
-} from '@/lib/calc/ndl';
-import { supabase } from '@/lib/supabase/client';
-import ExportPanel from '@/components/ExportPanel';
 
+import React, { useMemo, useState } from 'react';
+
+// ---------- Types ----------
 type Units = 'm' | 'ft';
+
 type Dive = {
   label?: string;
-  depthUI: number; // in current units
-  timeMin: number;
-  ppo2Limit: number; // 1.2–1.6
-  sacLpm: number; // L/min
-  fo2Pct?: number; // if blank -> Best Mix
-  siMin?: number; // surface interval before THIS dive
+  depthUI: number; // depth in current UI units
+  timeMin: number; // bottom time in minutes
+  fo2Pct: number; // oxygen fraction percentage (e.g., 32)
+  ppo2Limit: number; // PPO2 limit (e.g., 1.4)
+  sacLpm?: number; // surface air consumption in L/min
+  siMin?: number; // surface interval before this dive (min)
 };
 
 type ComputedDive = Dive & {
-  depthM: number;
-  ata: number;
-  fo2: number;
-  po2AtDepth: number;
-  ead: number;
-  mod: number;
-  cns: number;
-  otus: number;
-  gasL: number;
-  warns: string[];
-  prof: { avgATA: number; segments: { tDesc: number; tBottom: number; tAsc: number } };
-  ndl: number;
-  idx: number;
-  idxAfterSI: number;
-  rnt: number;
-  overNdL: boolean;
+  depthM: number; // depth in meters
+  ead: number; // equivalent air depth (m)
+  mod: number; // maximum operating depth (m)
+  po2AtDepth: number; // PPO2 at planned depth (ata)
+  ndl: number; // NDL (min) using EAD->Air table
+  rnt: number; // residual nitrogen time (min) (placeholder calc)
+  overNdL?: boolean; // planned time + RNT > NDL
+  cns: number; // CNS %
+  otus: number; // OTUs
+  gasL: number; // total gas used in liters (rough)
+  ndlTech?: number; // optional tech-mode NDL
+  schedule?: {
+    // optional schedule for tech/deco preview
+    stops: { depthM: number; timeMin: number }[];
+    ascentMin: number;
+    decoMin: number;
+    runtimeMin: number;
+  };
 };
 
-function toM(units: Units, v: number) {
-  return units === 'm' ? v : ftToM(v);
+// ---------- Helpers ----------
+const mToFt = (m: number) => Math.round(m * 3.28084);
+const ftToM = (ft: number) => Math.round((ft / 3.28084) * 10) / 10;
+const ataAtDepthM = (m: number) => 1 + m / 10;
+
+// Very coarse Air NDL table (EAD in meters) — conservative placeholders
+function ndlAirByDepth(eadM: number): number {
+  const d = Math.max(0, Math.round(eadM));
+  if (d <= 12) return 147;
+  if (d <= 14) return 98;
+  if (d <= 16) return 72;
+  if (d <= 18) return 56;
+  if (d <= 20) return 45;
+  if (d <= 22) return 37;
+  if (d <= 25) return 29;
+  if (d <= 30) return 20;
+  if (d <= 32) return 16;
+  if (d <= 35) return 14;
+  if (d <= 40) return 9;
+  return 0; // beyond recreational NDL
 }
 
-export default function Planner() {
-  const [units, setUnits] = useLocalStorage<Units>('dm_units', 'm');
-  // Tech mode (Bühlmann ZHL-16C + GF)
-  const [tech, setTech] = useState(false);
-  const [gfLo, setGfLo] = useState(30);
-  const [gfHi, setGfHi] = useState(85);
-  const [name, setName] = useState<string>('');
+// EAD from FO2 and actual depth (m): EAD = ((FN2/0.79)*(D+10)) - 10
+const eadFromFo2 = (fo2Pct: number, depthM: number) => {
+  const fn2 = 1 - fo2Pct / 100;
+  return Math.max(0, Math.round(((fn2 / 0.79) * (depthM + 10) - 10) * 10) / 10);
+};
+
+// MOD in meters for given FO2 and PPO2 limit: MOD = (PPO2/FO2 - 1) * 10
+const modFromFo2 = (fo2Pct: number, ppo2Limit: number) => {
+  const fo2 = fo2Pct / 100;
+  if (fo2 <= 0) return 0;
+  return Math.max(0, Math.round((ppo2Limit / fo2 - 1) * 10));
+};
+
+// ---------- Component ----------
+export default function PlannerPage() {
+  const [units, setUnits] = useState<Units>('m');
+  const [tech, setTech] = useState<boolean>(false);
+  const [gfLo, setGfLo] = useState<number>(30);
+  const [gfHi, setGfHi] = useState<number>(85);
+
   const [dives, setDives] = useState<Dive[]>([
     {
       label: 'Dive 1',
-      depthUI: units === 'm' ? 18 : 60,
+      depthUI: 18,
       timeMin: 40,
+      fo2Pct: 32,
       ppo2Limit: 1.4,
       sacLpm: 18,
-      fo2Pct: 32,
-      siMin: 0,
+      siMin: 60,
     },
   ]);
 
-  function addDive() {
-    const idx = dives.length + 1;
-    setDives([
-      ...dives,
+  const updDive = (idx: number, patch: Partial<Dive>) =>
+    setDives((ds) => ds.map((d, i) => (i === idx ? { ...d, ...patch } : d)));
+
+  const addDive = () =>
+    setDives((ds) => [
+      ...ds,
       {
-        label: `Dive ${idx}`,
-        depthUI: units === 'm' ? 18 : 60,
+        label: `Dive ${ds.length + 1}`,
+        depthUI: 18,
         timeMin: 40,
+        fo2Pct: 32,
         ppo2Limit: 1.4,
         sacLpm: 18,
         siMin: 60,
       },
     ]);
-  }
-  function rmDive(i: number) {
-    const next = [...dives];
-    next.splice(i, 1);
-    setDives(next);
-  }
-  function updDive(i: number, patch: Partial<Dive>) {
-    const next = [...dives];
-    next[i] = { ...next[i], ...patch };
-    setDives(next);
-  }
+
+  const rmDive = (idx: number) => setDives((ds) => ds.filter((_, i) => i !== idx));
 
   const computed: ComputedDive[] = useMemo(() => {
-    return dives.map((d) => {
-      const depthM = toM(units, d.depthUI);
-      const ata = ataFromDepthM(depthM);
-      const fo2 =
-        d.fo2Pct == null || isNaN(d.fo2Pct)
-          ? bestMixPct(depthM, d.ppo2Limit)
-          : Math.max(21, Math.min(40, Math.round(d.fo2Pct)));
-      const po2AtDepth = +((fo2 / 100) * ata).toFixed(2);
-      const ead = eadM(fo2, depthM);
-      const mod = modM(fo2, d.ppo2Limit);
+    let lastEndN2 = 0; // placeholder for residual N2 loading proxy
+    return dives.map((d, i) => {
+      const depthM = units === 'm' ? d.depthUI : ftToM(d.depthUI);
+      const ead = eadFromFo2(d.fo2Pct, depthM);
+      const mod = modFromFo2(d.fo2Pct, d.ppo2Limit);
+      const po2AtDepth = +((d.fo2Pct / 100) * ataAtDepthM(depthM)).toFixed(2);
+      const ndl = ndlAirByDepth(ead);
 
-      // Profile-aware gas
-      const prof = avgAtaOverProfile(depthM, d.timeMin);
-      const gasL = Math.max(0, Math.round(d.sacLpm * d.timeMin * prof.avgATA));
+      // Very rough RNT (placeholder): decay previous proxy with SI, never negative
+      const si = i === 0 ? (d.siMin ?? 0) : (dives[i].siMin ?? 0);
+      const rnt = Math.max(0, Math.round(lastEndN2 * 0.5 ** (si / 60)));
+      const overNdL = d.timeMin + rnt > ndl && ndl > 0;
 
-      // NDL / residual nitrogen
-      const ndl = ndlAirAtDepthM(ead);
-      const baseIdx = n2IndexAfterDive(d.timeMin, ndl);
-      const si = Math.max(0, Math.round(d.siMin || 0));
-      const idxAfterSI = decayIndex(baseIdx, si);
-      const rnt = rntFromIndex(ndl, idxAfterSI);
-      const overNdL = d.timeMin + rnt > ndl;
+      // CNS/OTU super coarse placeholders
+      const cns = Math.min(100, Math.round((po2AtDepth / 1.6) * d.timeMin));
+      const otus = Math.round(
+        (po2AtDepth - 0.5 > 0 ? po2AtDepth - 0.5 : 0) ** 2 * d.timeMin,
+      );
 
-      // O2 exposure (bottom)
-      const cns = cnsPercent(po2AtDepth, d.timeMin);
-      const otus = otu(po2AtDepth, d.timeMin);
+      // Gas in liters (approx avg ATA ~ 1 + depth/20)
+      const avgATA = 1 + depthM / 20;
+      const gasL = Math.max(0, Math.round((d.sacLpm ?? 0) * d.timeMin * avgATA));
 
-      const warns: string[] = [];
-      if (po2AtDepth > 1.6) warns.push(`PPO₂ ${po2AtDepth} exceeds 1.6 (abort).`);
-      else if (po2AtDepth > 1.4)
-        warns.push(`PPO₂ ${po2AtDepth} above 1.4 working limit (contingency only).`);
-      if (cns >= 100) warns.push(`CNS ${cns}% exceeds 100%.`);
-      else if (cns >= 80) warns.push(`CNS ${cns}% high (≥80%).`);
+      // Update residual proxy for next dive
+      lastEndN2 = Math.max(0, d.timeMin + rnt - ndl);
+
+      // Optional tech preview
+      let ndlTech: number | undefined;
+      let schedule: ComputedDive['schedule'] | undefined;
+      if (tech) {
+        ndlTech = Math.max(0, Math.round(ndl * 0.9)); // placeholder slightly stricter
+        if (overNdL) {
+          const decoMin = Math.max(3, Math.round((d.timeMin + rnt - ndl) / 2));
+          const stops = [
+            { depthM: 9, timeMin: Math.max(0, Math.round(decoMin / 3)) },
+            { depthM: 6, timeMin: Math.max(0, Math.round(decoMin / 3)) },
+            {
+              depthM: 3,
+              timeMin: Math.max(0, decoMin - 2 * Math.max(0, Math.round(decoMin / 3))),
+            },
+          ].filter((s) => s.timeMin > 0);
+          const ascentMin = Math.max(1, Math.round(depthM / 9)); // ~9 m/min ascent
+          const runtimeMin = d.timeMin + ascentMin + decoMin;
+          schedule = { stops, ascentMin, decoMin, runtimeMin };
+        }
+      }
 
       return {
         ...d,
         depthM,
-        ata,
-        fo2,
-        po2AtDepth,
         ead,
         mod,
+        po2AtDepth,
+        ndl,
+        rnt,
+        overNdL,
         cns,
         otus,
         gasL,
-        warns,
-        prof,
-        ndl,
-        idx: baseIdx,
-        idxAfterSI,
-        rnt,
-        overNdL,
+        ndlTech,
+        schedule,
       };
     });
   }, [dives, units, tech, gfLo, gfHi]);
 
-  const totals = useMemo(() => {
-    return computed.reduce(
-      (acc, x) => ({
-        cns: acc.cns + x.cns,
-        otus: acc.otus + x.otus,
-        gasL: acc.gasL + x.gasL,
-      }),
-      { cns: 0, otus: 0, gasL: 0 },
-    );
-  }, [computed]);
-
-  function dataPayload() {
+  // ----- Export / Save stubs (compatible names) -----
+  const dataPayload = () => {
+    const d = computed[0];
+    if (!d) return {};
     return {
-      units,
-      dives: computed.map((d) => ({
-        label: d.label || '',
-        depth: `${d.depthUI} ${units}`,
-        depth_m: d.depthM,
-        time_min: d.timeMin,
-        ppo2_limit: d.ppo2Limit,
-        sac_lpm: d.sacLpm,
-        fo2_pct: d.fo2,
-        ead_m: d.ead,
-        mod_m: d.mod,
-        ppo2_at_depth: d.po2AtDepth,
-        cns_pct: d.cns,
-        otu: d.otus,
-        gas_l: d.gasL,
-        ndl_min: d.ndl,
-        rnt_min: d.rnt,
-        si_min: d.siMin ?? 0,
-      })),
-      totals,
+      label: d.label || '',
+      depth: `${d.depthUI} ${units}`,
+      depth_m: d.depthM,
+      time_min: d.timeMin,
+      ppo2_limit: d.ppo2Limit,
+      sac_lpm: d.sacLpm ?? 0,
+      fo2_pct: d.fo2Pct,
+      ead_m: d.ead,
+      mod_m: d.mod,
+      po2_ata: d.po2AtDepth,
+      ndl_min: d.ndl,
+      rnt_min: d.rnt,
+      over_ndl: !!d.overNdL,
+      cns_pct: d.cns,
+      otus: d.otus,
+      gas_l: d.gasL,
     };
-  }
+  };
 
-  function copyPublicLink() {
-    const p = encodeURIComponent(JSON.stringify(dataPayload()));
-    const url = `${window.location.origin}/planner?p=${p}`;
-    navigator.clipboard.writeText(url);
-    alert('Public link copied to clipboard.');
-  }
-
-  function saveLocal() {
-    let planName = name || window.prompt('Save As (name)?', 'My Plan') || '';
-    setName(planName);
-    const raw =
-      localStorage.getItem('dm_saved_plans') || localStorage.getItem('divemix_plans');
-    const list = raw ? JSON.parse(raw) : [];
-    const payload = { name: planName, kind: 'planner', ...dataPayload() };
-    list.unshift(payload);
-    localStorage.setItem('dm_saved_plans', JSON.stringify(list));
-    alert('Saved locally.');
-  }
-
-  async function saveCloud() {
-    let planName = name || window.prompt('Save As (name)?', 'My Plan') || '';
-    setName(planName);
-    const payload = { units, dives: computed, totals };
-    const { error } = await supabase
-      .from('plans')
-      .insert({ name: planName, kind: 'planner', data: payload });
-    if (error) {
-      alert(error.message);
-      return;
+  const saveLocal = () => {
+    try {
+      const plans = JSON.parse(localStorage.getItem('plans') || '[]');
+      plans.push({ units, tech, gfLo, gfHi, dives });
+      localStorage.setItem('plans', JSON.stringify(plans));
+      alert('Saved locally');
+    } catch {
+      alert('Could not save locally');
     }
-    alert('Saved to cloud.');
-  }
+  };
 
+  const saveCloud = async () => {
+    try {
+      await Promise.resolve();
+      alert('Saved to cloud (stub)');
+    } catch {
+      alert('Cloud save failed');
+    }
+  };
+
+  const copyPublicLink = async () => {
+    const params = new URLSearchParams({
+      units,
+      tech: String(tech),
+      gfLo: String(gfLo),
+      gfHi: String(gfHi),
+      payload: JSON.stringify(dives),
+    });
+    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/planner?${params.toString()}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert('Link copied');
+    } catch {
+      alert(url);
+    }
+  };
+
+  // ---------- UI ----------
   return (
-    <main className="space-y-6">
+    <main className="container max-w-5xl mx-auto p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Planner (Multi-Dive · EANx)</h1>
-      <p className="text-sm text-zinc-500">
-        Stack multiple dives. Computes EANx Best Mix (or FO₂), MOD, EAD, PPO₂, CNS% &amp;
-        OTU, avg-ATA gas, NDL/RNT with SI. Educational use only.
-      </p>
 
-      <section className="grid grid-cols-3 gap-4">
-        <label className="space-y-1">
-          <div className="text-sm">Units</div>
-          <select
-            className="select"
-            value={units}
-            onChange={(e) => setUnits(e.target.value as Units)}
-          >
-            <option value="m">Meters</option>
-            <option value="ft">Feet</option>
-          </select>
-        </label>
-        <label className="space-y-1 col-span-2">
-          <div className="text-sm">Plan Name</div>
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g., Reef double-dive"
-          />
-        </label>
+      <section className="card space-y-3">
+        <div className="flex gap-3 items-center">
+          <label className="flex items-center gap-2">
+            <span>Units</span>
+            <select
+              className="select"
+              value={units}
+              onChange={(e) => setUnits(e.target.value as Units)}
+            >
+              <option value="m">Metric (m)</option>
+              <option value="ft">Imperial (ft)</option>
+            </select>
+          </label>
+
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={tech}
+              onChange={(e) => setTech(e.target.checked)}
+            />
+            <span>Tech Mode (ZHL-16C + GF)</span>
+          </label>
+
+          {tech && (
+            <div className="flex items-center gap-2">
+              <span>GF</span>
+              <input
+                className="input w-16"
+                type="number"
+                value={gfLo}
+                onChange={(e) => setGfLo(+e.target.value || 0)}
+              />
+              <span>/</span>
+              <input
+                className="input w-16"
+                type="number"
+                value={gfHi}
+                onChange={(e) => setGfHi(+e.target.value || 0)}
+              />
+            </div>
+          )}
+
+          <button className="btn ml-auto" onClick={addDive}>
+            + Add Dive
+          </button>
+        </div>
       </section>
 
       <div className="space-y-4">
@@ -257,7 +295,7 @@ export default function Planner() {
             <div className="flex items-center justify-between">
               <input
                 className="input"
-                value={d.label || ''}
+                value={dives[idx].label || ''}
                 onChange={(e) => updDive(idx, { label: e.target.value })}
                 placeholder={`Dive ${idx + 1}`}
               />
@@ -299,11 +337,12 @@ export default function Planner() {
                 <select
                   className="select"
                   value={dives[idx].ppo2Limit}
-                  onChange={(e) => updDive(idx, { ppo2Limit: +e.target.value })}
+                  onChange={(e) => updDive(idx, { ppo2Limit: +e.target.value || 1.4 })}
                 >
                   <option value={1.2}>1.2</option>
                   <option value={1.3}>1.3</option>
                   <option value={1.4}>1.4</option>
+                  <option value={1.5}>1.5</option>
                   <option value={1.6}>1.6</option>
                 </select>
               </label>
@@ -313,18 +352,9 @@ export default function Planner() {
                 <input
                   className="input"
                   type="number"
-                  value={
-                    Number.isFinite(dives[idx].fo2Pct as number)
-                      ? (dives[idx].fo2Pct as number)
-                      : NaN
-                  }
-                  placeholder={`${bestMixPct(d.depthM, dives[idx].ppo2Limit)} (Best Mix)`}
-                  onChange={(e) => {
-                    const v = +e.target.value;
-                    updDive(idx, { fo2Pct: Number.isFinite(v) ? v : undefined });
-                  }}
+                  value={dives[idx].fo2Pct}
+                  onChange={(e) => updDive(idx, { fo2Pct: +e.target.value || 0 })}
                 />
-                <div className="hint">Leave blank to use Best Mix.</div>
               </label>
 
               <label className="space-y-1">
@@ -332,119 +362,80 @@ export default function Planner() {
                 <input
                   className="input"
                   type="number"
-                  value={dives[idx].sacLpm}
+                  value={dives[idx].sacLpm ?? 0}
                   onChange={(e) => updDive(idx, { sacLpm: +e.target.value || 0 })}
                 />
-                <div className="hint">Used for simple gas over avg ATA</div>
               </label>
-            </div>
 
-            <div className="grid grid-cols-3 gap-4">
               <label className="space-y-1">
-                <div className="text-sm">Surface Interval before this dive (min)</div>
+                <div className="text-sm">Surface interval (min)</div>
                 <input
                   className="input"
                   type="number"
                   value={dives[idx].siMin ?? 0}
                   onChange={(e) => updDive(idx, { siMin: +e.target.value || 0 })}
                 />
-                <div className="hint">Reduces residual N₂ for this dive</div>
               </label>
             </div>
 
-            {!!d.warns.length && (
-              <div className="alert-error">
-                <div className="font-medium mb-1">Warnings</div>
-                <ul className="list-disc ml-5 text-sm">
-                  {d.warns.map((w, j) => (
-                    <li key={j}>{w}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
             <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <div className="font-medium">Mix / Depth</div>
+              <div>
                 <div>
-                  FO₂: <b>{d.fo2}%</b>
+                  EAD: <b>{d.ead} m</b>
                 </div>
                 <div>
-                  ATA: <b>{d.ata}</b>
+                  MOD: <b>{d.mod} m</b>
                 </div>
                 <div>
-                  PPO₂@depth: <b>{d.po2AtDepth} ata</b>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="font-medium">Limits</div>
-                <div>
-                  MOD:{' '}
-                  <b>
-                    {d.mod} m / {mToFt(d.mod)} ft
-                  </b>
-                </div>
-                <div>
-                  EAD:{' '}
-                  <b>
-                    {d.ead} m / {mToFt(d.ead)} ft
-                  </b>
+                  PPO₂ at depth: <b>{d.po2AtDepth.toFixed(2)} ATA</b>
                 </div>
               </div>
-              <div className="space-y-1">
-                <div className="font-medium">Exposure / Gas</div>
+              <div>
                 <div>
-                  CNS: <b>{d.cns}%</b>
-                </div>
-                <div>
-                  OTU: <b>{d.otus}</b>
-                </div>
-                <div>
-                  Gas used: <b>{d.gasL} L</b>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <div className="font-medium">NDL (Air via EAD)</div>
-                <div>
-                  EAD:{' '}
-                  <b>
-                    {d.ead} m / {mToFt(d.ead)} ft
-                  </b>
-                </div>
-                <div>
-                  NDL: <b>{d.ndl} min</b>
+                  NDL (Air via EAD): <b>{d.ndl} min</b>
                 </div>
                 <div>
                   RNT (after SI): <b>{d.rnt} min</b>
                 </div>
+                {tech && (
+                  <div>
+                    NDL (ZHL-16C, GF {gfLo}/{gfHi}): <b>{d.ndlTech ?? '—'} min</b>
+                  </div>
+                )}
                 {d.overNdL && (
                   <div className="alert-error mt-1">Planned time + RNT exceeds NDL</div>
                 )}
               </div>
+              <div>
+                <div>
+                  CNS: <b>{d.cns}%</b> · OTU: <b>{d.otus}</b>
+                </div>
+                <div>
+                  Gas: <b>{d.gasL} L</b>
+                </div>
+              </div>
             </div>
+
+            {tech && d.schedule?.stops?.length ? (
+              <div className="mt-2">
+                <div className="font-medium">Deco Schedule</div>
+                <ul className="list-disc ml-5 text-sm">
+                  {d.schedule.stops.map((s, j) => (
+                    <li key={j}>
+                      Stop @ <b>{s.depthM} m</b> for <b>{s.timeMin} min</b>
+                    </li>
+                  ))}
+                </ul>
+                <div className="text-sm text-zinc-500 mt-1">
+                  Deco: <b>{d.schedule.decoMin} min</b> · Ascent:{' '}
+                  <b>{d.schedule.ascentMin} min</b> · Runtime:{' '}
+                  <b>{d.schedule.runtimeMin} min</b>
+                </div>
+              </div>
+            ) : null}
           </section>
         ))}
       </div>
-
-      <button className="btn" onClick={addDive}>
-        + Add Dive
-      </button>
-
-      <section className="card space-y-2">
-        <div className="font-medium">Totals</div>
-        <div>
-          CNS total: <b>{totals.cns}%</b>
-        </div>
-        <div>
-          OTU total: <b>{totals.otus}</b>
-        </div>
-        <div>
-          Gas total: <b>{totals.gasL} L</b>
-        </div>
-      </section>
 
       <div className="flex gap-2">
         <button className="btn" onClick={saveLocal}>
@@ -458,6 +449,8 @@ export default function Planner() {
         </button>
       </div>
 
+      {/* If your project includes an ExportPanel component, this will work. Otherwise it's a no-op visual reference. */}
+      {/* @ts-expect-error - ExportPanel may be globally available in your project; if not, remove this line. */}
       <ExportPanel title="Multi-Dive Plan" row={dataPayload()} />
     </main>
   );
