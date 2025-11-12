@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { encodePlan, copy } from '@/lib/utils/share';
 
 type Plan = {
   ts: number;
@@ -145,6 +146,28 @@ export default function Saved() {
                   {new Date(p.ts).toLocaleString()}
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    className="btn"
+                    onClick={async () => {
+                      const payload = {
+                        units: p.units,
+                        depthUI: p.depthUI,
+                        depthM: p.depthM,
+                        time: p.time,
+                        fo2Pct: p.fo2Pct,
+                        targetPp: p.targetPp,
+                        sac: p.sac,
+                        label: p.label,
+                        site: p.site,
+                      };
+                      const code = encodePlan(payload);
+                      const url = `${location.origin}/planner?p=${code}`;
+                      const ok = await copy(url);
+                      alert(ok ? 'Share link copied' : url);
+                    }}
+                  >
+                    Share
+                  </button>
                   <button className="btn" onClick={() => loadInPlanner(p)}>
                     Load in Planner
                   </button>

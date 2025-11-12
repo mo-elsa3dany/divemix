@@ -1,27 +1,30 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ppO2, modMeters, gasUsedLiters, mToFt } from '@/lib/calc/gas';
 import { clamp, toInt, toFloat } from '@/lib/utils/num';
 import { cnsPercent, otus } from '@/lib/calc/cns';
 import { downloadJSON, downloadText } from '@/lib/utils/export';
+import { encodePlan, decodePlan, copy } from '@/lib/utils/share';
 
 export default function Planner() {
   const [units, setUnits] = useState<'m' | 'ft'>('m');
-  const [depthInUI, setDepthInUI] = useState(18); // m or ft based on units
-  const [time, setTime] = useState(40); // min
-  const [fo2Pct, setFo2Pct] = useState(32); // %
-  const [targetPp, setTargetPp] = useState(1.4); // ata
-  const [sac, setSac] = useState(18); // L/min at surface
+  const [depthInUI, setDepthInUI] = useState(18);
+  const [time, setTime] = useState(40);
+  const [fo2Pct, setFo2Pct] = useState(32);
+  const [targetPp, setTargetPp] = useState(1.4);
+  const [sac, setSac] = useState(18);
+  const [label, setLabel] = useState('');
+  const [site, setSite] = useState('');
 
-  // clamp all inputs
+  // clamps
   const depthUI = clamp(depthInUI, 0, units === 'm' ? 60 : Math.round(60 * 3.28084));
   const timeCl = clamp(time, 1, 300);
   const fo2Cl = clamp(fo2Pct, 21, 40);
   const ppCl = clamp(targetPp, 1.0, 1.6);
   const sacCl = clamp(sac, 8, 30);
 
-  // convert to meters for calc
+  // meters canonical
   const depthM = useMemo(
     () => (units === 'm' ? depthUI : Math.round(depthUI / 3.28084)),
     [depthUI, units],
@@ -37,9 +40,29 @@ export default function Planner() {
   const cns = useMemo(() => cnsPercent(ppo2, timeCl), [ppo2, timeCl]);
   const otu = useMemo(() => otus(ppo2, timeCl), [ppo2, timeCl]);
 
+  // URL import (?p=... or #p=...)
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const qp =
+        url.searchParams.get('p') ||
+        (url.hash.startsWith('#p=') ? url.hash.slice(3) : '');
+      if (!qp) return;
+      const data = decodePlan<any>(qp);
+      if (!data) return;
+      if (data.units) setUnits(data.units);
+      if (typeof data.depthUI === 'number') setDepthInUI(data.depthUI);
+      if (typeof data.time === 'number') setTime(data.time);
+      if (typeof data.fo2Pct === 'number') setFo2Pct(data.fo2Pct);
+      if (typeof data.targetPp === 'number') setTargetPp(data.targetPp);
+      if (typeof data.sac === 'number') setSac(data.sac);
+      if (typeof data.label === 'string') setLabel(data.label);
+      if (typeof data.site === 'string') setSite(data.site);
+    } catch {}
+  }, []);
+
   const warnings: string[] = [];
   const errors: string[] = [];
-
   if (ppo2 > ppCl) warnings.push(`PPO₂ ${ppo2.toFixed(2)} exceeds max ${ppCl}.`);
   if (depthM > mod)
     warnings.push(`Depth ${depthM} m exceeds MOD ${mod} m for FO₂ ${fo2Cl}%.`);
@@ -49,6 +72,18 @@ export default function Planner() {
   if (cns >= 80 && cns < 100) warnings.push(`High CNS load: ${cns}%`);
   if (cns >= 100) errors.push(`CNS ${cns}% (exceeds 100%)`);
 
+  const payload = {
+    units,
+    depthUI,
+    depthM,
+    time: timeCl,
+    fo2Pct: fo2Cl,
+    targetPp: ppCl,
+    sac: sacCl,
+    label: label.trim() || undefined,
+    site: site.trim() || undefined,
+  };
+
   return (
     <main className="space-y-6">
       <h1 className="text-2xl font-semibold">Dive Planner</h1>
@@ -57,6 +92,28 @@ export default function Planner() {
       </p>
 
       <section className="grid grid-cols-2 gap-4">
+        <label className="space-y-1 col-span-2">
+          <div className="text-sm">Label (tag)</div>
+          <input
+            className="input"
+            placeholder="Training, Rec, Tech, Checkout…"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+          <div className="hint">Optional short tag you’ll sort/filter by later.</div>
+        </label>
+
+        <label className="space-y-1 col-span-2">
+          <div className="text-sm">Site</div>
+          <input
+            className="input"
+            placeholder="Hole-in-the-Wall, Lighthouse Point…"
+            value={site}
+            onChange={(e) => setSite(e.target.value)}
+          />
+          <div className="hint">Optional site or boat name.</div>
+        </label>
+
         <label className="space-y-1">
           <div className="text-sm">Units</div>
           <select
@@ -180,13 +237,7 @@ export default function Planner() {
           onClick={() => {
             const entry = {
               ts: Date.now(),
-              units,
-              depthUI,
-              depthM,
-              time: timeCl,
-              fo2Pct: fo2Cl,
-              targetPp: ppCl,
-              sac: sacCl,
+              ...payload,
               result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
             };
             try {
@@ -208,6 +259,8 @@ export default function Planner() {
           onClick={() => {
             const txt = [
               `Dive Plan @ ${new Date().toLocaleString()}`,
+              label ? `Label: ${label}` : '',
+              site ? `Site: ${site}` : '',
               `Units: ${units}`,
               `Depth: ${depthUI} ${units} (${depthM} m)`,
               `Time: ${timeCl} min`,
@@ -218,7 +271,9 @@ export default function Planner() {
               `MOD: ${mod} m (${Math.round(mod * 3.28084)} ft)`,
               `Gas used: ${gasL} L`,
               `CNS: ${cns}% | OTU: ${otu}`,
-            ].join('\n');
+            ]
+              .filter(Boolean)
+              .join('\n');
             downloadText('divemix-plan.txt', txt);
           }}
         >
@@ -228,21 +283,27 @@ export default function Planner() {
         <button
           className="btn"
           onClick={() => {
-            const payload = {
+            const p = {
               ts: Date.now(),
-              units,
-              depthUI,
-              depthM,
-              time: timeCl,
-              fo2Pct: fo2Cl,
-              targetPp: ppCl,
-              sac: sacCl,
+              ...payload,
               result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
             };
-            downloadJSON('divemix-plan.json', payload);
+            downloadJSON('divemix-plan.json', p);
           }}
         >
           Export .json
+        </button>
+
+        <button
+          className="btn"
+          onClick={async () => {
+            const code = encodePlan(payload);
+            const url = `${location.origin}/planner?p=${code}`;
+            const ok = await copy(url);
+            alert(ok ? 'Share link copied to clipboard' : url);
+          }}
+        >
+          Share Link
         </button>
 
         <a href="/saved" className="underline self-center">
