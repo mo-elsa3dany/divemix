@@ -1,4 +1,5 @@
-'use client';
+import ExportPanel from '@/components/ExportPanel';
+('use client');
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMemo, useState } from 'react';
@@ -161,6 +162,18 @@ export default function Nitrox() {
           Always analyze; this is a simplified planning aid, not a fill procedure.
         </p>
       </section>
+
+      <ExportPanel
+        title="Nitrox Plan"
+        row={{
+          units,
+          depth: depthUI + ' ' + units,
+          depth_m: units === 'm' ? depthUI : Math.round(depthUI / 3.28084),
+          ppo2_limit: maxPPO2,
+          target_fo2_pct: targetFO2,
+          start_fo2_pct: startO2,
+        }}
+      />
     </main>
   );
 }

@@ -1,4 +1,5 @@
-'use client';
+import ExportPanel from '@/components/ExportPanel';
+('use client');
 import { useState } from 'react';
 import { cnsPercent, otu, ambientAtaFromMeters } from '@/lib/calc/cns';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
@@ -202,6 +203,17 @@ export default function Trimix() {
           × minutes.
         </p>
       </section>
+
+      <ExportPanel
+        title="Trimix Plan"
+        row={{
+          units,
+          depth: depthUI + ' ' + units,
+          target_end_m: targetEND,
+          bottom_time_min: bottomTime,
+          ppo2_limit: maxPPO2,
+        }}
+      />
     </main>
   );
 }

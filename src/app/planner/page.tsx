@@ -376,6 +376,21 @@ export default function Planner() {
           View Saved
         </a>
       </div>
+
+      {(() => {
+        try {
+          const { useSearchParams } = require('next/navigation');
+          const ExportPanel = require('@/components/ExportPanel').default;
+          const sp = useSearchParams();
+          let row = {};
+          try {
+            row = JSON.parse(sp.get('p') || '{}');
+          } catch {}
+          return <ExportPanel title="Dive Plan" row={row} />;
+        } catch (e) {
+          return null;
+        }
+      })()}
     </main>
   );
 }
