@@ -191,15 +191,15 @@ export default function SavedPage() {
   return (
     <main className="space-y-6">
       <h1 className="text-2xl font-semibold">Saved Plans</h1>
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-zinc-400">
         Manage your local and cloud plans. Load, rename, duplicate, delete, export.
       </p>
 
       <section className="space-y-3">
         <div className="text-lg font-medium">Local</div>
-        {!localPlans && <div className="text-sm text-zinc-500">Loading…</div>}
+        {!localPlans && <div className="text-sm text-zinc-400">Loading…</div>}
         {localPlans && localPlans.length === 0 && (
-          <div className="text-sm text-zinc-500">No local plans yet.</div>
+          <div className="text-sm text-zinc-400">No local plans yet.</div>
         )}
         {localPlans && localPlans.length > 0 && (
           <div className="space-y-3">
@@ -207,7 +207,7 @@ export default function SavedPage() {
               <div key={p.id} className="card flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="font-medium">{p.name}</div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-zinc-400">
                     {p.kind} · {new Date(p.created_at).toLocaleString()}
                   </div>
                 </div>
@@ -239,9 +239,9 @@ export default function SavedPage() {
 
       <section className="space-y-3">
         <div className="text-lg font-medium">Cloud</div>
-        {loadingCloud && <div className="text-sm text-zinc-500">Loading from cloud…</div>}
+        {loadingCloud && <div className="text-sm text-zinc-400">Loading from cloud…</div>}
         {cloudPlans && cloudPlans.length === 0 && (
-          <div className="text-sm text-zinc-500">No cloud plans yet.</div>
+          <div className="text-sm text-zinc-400">No cloud plans yet.</div>
         )}
         {cloudPlans && cloudPlans.length > 0 && (
           <div className="space-y-3">
@@ -249,7 +249,7 @@ export default function SavedPage() {
               <div key={p.id} className="card flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="font-medium">{p.name}</div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-zinc-400">
                     {p.kind} · {new Date(p.created_at).toLocaleString()}
                   </div>
                 </div>
