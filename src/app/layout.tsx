@@ -28,26 +28,30 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <AnalyticsClient />
         <header className="max-w-4xl mx-auto p-4 flex items-center gap-6">
-          <Link href="/" className="text-xl font-semibold">
+          <Link
+            href="/"
+            className="text-xl font-semibold hover:underline hover:text-zinc-200"
+          >
             DiveMix
           </Link>
-          <nav className="ml-auto flex items-center gap-4 text-sm">
-            <Link href="/planner" className="hover:underline">
-              <a href="/saved" className="nav-link">
-                Saved
-              </a>
+
+          <nav className="ml-auto flex items-center gap-4 text-sm text-zinc-400">
+            <Link href="/planner" className="hover:underline hover:text-zinc-200">
               Planner
             </Link>
-            <Link href="/nitrox" className="hover:underline">
+            <Link href="/saved" className="hover:underline hover:text-zinc-200">
+              Saved
+            </Link>
+            <Link href="/nitrox" className="hover:underline hover:text-zinc-200">
               Nitrox
             </Link>
-            <Link href="/trimix" className="hover:underline">
+            <Link href="/trimix" className="hover:underline hover:text-zinc-200">
               Trimix
             </Link>
-            <Link href="/pricing" className="hover:underline">
+            <Link href="/pricing" className="hover:underline hover:text-zinc-200">
               Pricing
             </Link>
-            <Link href="/docs" className="hover:underline">
+            <Link href="/docs" className="hover:underline hover:text-zinc-200">
               Docs
             </Link>
           </nav>
