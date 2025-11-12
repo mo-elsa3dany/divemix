@@ -1,396 +1,358 @@
 'use client';
-import { toCSVRow } from '@/lib/utils/csv';
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-import { useEffect, useMemo, useState } from 'react';
-import { ppO2, modMeters, gasUsedLiters, mToFt } from '@/lib/calc/gas';
-import { clamp, toInt, toFloat } from '@/lib/utils/num';
-import { cnsPercent, otu } from '@/lib/calc/cns';
-import { downloadJSON, downloadText } from '@/lib/utils/export';
-import { encodePlan, decodePlan, copy } from '@/lib/utils/share';
-import { useSupabaseAuth } from '@/lib/supabase/useAuth';
+import { useState, useMemo } from 'react';
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
+import { cnsPercent, otu, ambientAtaFromMeters } from '@/lib/calc/cns';
+import { bestMixPct, eadM, modM, ftToM, mToFt, ataFromDepthM } from '@/lib/calc/ean';
 import { supabase } from '@/lib/supabase/client';
+import ExportPanel from '@/components/ExportPanel';
+
+type Units = 'm' | 'ft';
+type Dive = {
+  label?: string;
+  depthUI: number; // in current units
+  timeMin: number;
+  ppo2Limit: number; // 1.2–1.6
+  sacLpm: number; // surface gas rate (L/min)
+  fo2Pct?: number; // if omitted, compute Best Mix
+};
+
+function toM(units: Units, v: number) {
+  return units === 'm' ? v : ftToM(v);
+}
 
 export default function Planner() {
-  const { user } = useSupabaseAuth();
+  const [units, setUnits] = useLocalStorage<Units>('dm_units', 'm');
+  const [name, setName] = useState<string>('');
+  const [dives, setDives] = useState<Dive[]>([
+    {
+      label: 'Dive 1',
+      depthUI: units === 'm' ? 18 : 60,
+      timeMin: 40,
+      ppo2Limit: 1.4,
+      sacLpm: 18,
+      fo2Pct: 32,
+    },
+  ]);
 
-  const [units, setUnits] = useState<'m' | 'ft'>('m');
-  const [planName, setPlanName] = useState<string>('');
-  const [depthInUI, setDepthInUI] = useState(18);
-  const [time, setTime] = useState(40);
-  const [fo2Pct, setFo2Pct] = useState(32);
-  const [targetPp, setTargetPp] = useState(1.4);
-  const [sac, setSac] = useState(18);
-  const [label, setLabel] = useState('');
-  const [site, setSite] = useState('');
+  function addDive() {
+    const idx = dives.length + 1;
+    setDives([
+      ...dives,
+      {
+        label: `Dive ${idx}`,
+        depthUI: units === 'm' ? 18 : 60,
+        timeMin: 40,
+        ppo2Limit: 1.4,
+        sacLpm: 18,
+      },
+    ]);
+  }
+  function rmDive(i: number) {
+    const next = [...dives];
+    next.splice(i, 1);
+    setDives(next);
+  }
+  function updDive(i: number, patch: Partial<Dive>) {
+    const next = [...dives];
+    next[i] = { ...next[i], ...patch };
+    setDives(next);
+  }
 
-  const depthUI = clamp(depthInUI, 0, units === 'm' ? 60 : Math.round(60 * 3.28084));
-  const timeCl = clamp(time, 1, 300);
-  const fo2Cl = clamp(fo2Pct, 21, 40);
-  const ppCl = clamp(targetPp, 1.0, 1.6);
-  const sacCl = clamp(sac, 8, 30);
+  const computed = useMemo(() => {
+    return dives.map((d) => {
+      const depthM = toM(units, d.depthUI);
+      const ata = ataFromDepthM(depthM);
+      const fo2 =
+        d.fo2Pct == null || isNaN(d.fo2Pct)
+          ? bestMixPct(depthM, d.ppo2Limit)
+          : Math.max(21, Math.min(40, Math.round(d.fo2Pct)));
+      const po2AtDepth = +((fo2 / 100) * ata).toFixed(2);
+      const ead = eadM(fo2, depthM);
+      const mod = modM(fo2, d.ppo2Limit);
+      const cns = cnsPercent(po2AtDepth, d.timeMin);
+      const otus = otu(po2AtDepth, d.timeMin);
+      const gasL = Math.max(0, Math.round(d.sacLpm * d.timeMin * ata)); // simple bottom segment gas
+      const warns: string[] = [];
+      if (po2AtDepth > 1.6) warns.push(`PPO₂ ${po2AtDepth} exceeds 1.6 (abort).`);
+      else if (po2AtDepth > 1.4)
+        warns.push(`PPO₂ ${po2AtDepth} above 1.4 working limit (contingency only).`);
+      if (cns >= 100) warns.push(`CNS ${cns}% exceeds 100%.`);
+      else if (cns >= 80) warns.push(`CNS ${cns}% high (≥80%).`);
+      return { ...d, depthM, ata, fo2, po2AtDepth, ead, mod, cns, otus, gasL, warns };
+    });
+  }, [dives, units]);
 
-  const depthM = useMemo(
-    () => (units === 'm' ? depthUI : Math.round(depthUI / 3.28084)),
-    [depthUI, units],
-  );
-  const fo2 = useMemo(() => fo2Cl / 100, [fo2Cl]);
+  const totals = useMemo(() => {
+    return computed.reduce(
+      (acc, x) => ({
+        cns: acc.cns + x.cns,
+        otus: acc.otus + x.otus,
+        gasL: acc.gasL + x.gasL,
+      }),
+      { cns: 0, otus: 0, gasL: 0 },
+    );
+  }, [computed]);
 
-  const ppo2 = useMemo(() => ppO2(depthM, fo2), [depthM, fo2]);
-  const mod = useMemo(() => modMeters(ppCl, fo2), [ppCl, fo2]);
-  const gasL = useMemo(
-    () => gasUsedLiters(sacCl, timeCl, depthM),
-    [sacCl, timeCl, depthM],
-  );
-  const cns = useMemo(() => cnsPercent(ppo2, timeCl), [ppo2, timeCl]);
-  const otuScore = useMemo(() => otu(ppo2, timeCl), [ppo2, timeCl]);
+  // ---- Saving & share ----
+  function dataPayload() {
+    return {
+      units,
+      dives: computed.map((d) => ({
+        label: d.label || '',
+        depth: `${d.depthUI} ${units}`,
+        depth_m: d.depthM,
+        time_min: d.timeMin,
+        ppo2_limit: d.ppo2Limit,
+        sac_lpm: d.sacLpm,
+        fo2_pct: d.fo2,
+        ead_m: d.ead,
+        mod_m: d.mod,
+        ppo2_at_depth: d.po2AtDepth,
+        cns_pct: d.cns,
+        otu: d.otus,
+        gas_l: d.gasL,
+      })),
+      totals,
+    };
+  }
 
-  useEffect(() => {
-    try {
-      const url = new URL(window.location.href);
-      const qp =
-        url.searchParams.get('p') ||
-        (url.hash.startsWith('#p=') ? url.hash.slice(3) : '');
-      if (!qp) return;
-      const data = decodePlan<any>(qp);
-      if (!data) return;
-      if (data.units) setUnits(data.units);
-      if (typeof data.depthUI === 'number') setDepthInUI(data.depthUI);
-      if (typeof data.time === 'number') setTime(data.time);
-      if (typeof data.fo2Pct === 'number') setFo2Pct(data.fo2Pct);
-      if (typeof data.targetPp === 'number') setTargetPp(data.targetPp);
-      if (typeof data.sac === 'number') setSac(data.sac);
-      if (typeof data.label === 'string') setLabel(data.label);
-      if (typeof data.site === 'string') setSite(data.site);
-    } catch {}
-  }, []);
+  function copyPublicLink() {
+    const p = encodeURIComponent(JSON.stringify(dataPayload()));
+    const url = `${window.location.origin}/planner?p=${p}`;
+    navigator.clipboard.writeText(url);
+    alert('Public link copied to clipboard.');
+  }
 
-  const warnings: string[] = [];
-  const errors: string[] = [];
-  if (ppo2 > ppCl) warnings.push(`PPO₂ ${ppo2.toFixed(2)} exceeds max ${ppCl}.`);
-  if (depthM > mod)
-    warnings.push(`Depth ${depthM} m exceeds MOD ${mod} m for FO₂ ${fo2Cl}%.`);
-  if (fo2Cl < 21 || fo2Cl > 40) errors.push('FO₂ must be 21–40%.');
-  if (timeCl < 1 || timeCl > 300) errors.push('Time must be 1–300 minutes.');
-  if (sacCl < 8 || sacCl > 30) warnings.push('SAC outside typical range (8–30 L/min).');
-  if (cns >= 80 && cns < 100) warnings.push(`High CNS load: ${cns}%`);
-  if (cns >= 100) errors.push(`CNS ${cns}% (exceeds 100%)`);
+  function saveLocal() {
+    let planName = name || window.prompt('Save As (name)?', 'My Plan') || '';
+    setName(planName);
+    const raw =
+      localStorage.getItem('dm_saved_plans') || localStorage.getItem('divemix_plans');
+    const list = raw ? JSON.parse(raw) : [];
+    const payload = { name: planName, kind: 'planner', ...dataPayload() };
+    list.unshift(payload);
+    localStorage.setItem('dm_saved_plans', JSON.stringify(list));
+    alert('Saved locally.');
+  }
 
-  const payload = {
-    units,
-    depthUI,
-    depthM,
-    time: timeCl,
-    fo2Pct: fo2Cl,
-    targetPp: ppCl,
-    sac: sacCl,
-    label: label.trim() || undefined,
-    site: site.trim() || undefined,
-  };
+  async function saveCloud() {
+    let planName = name || window.prompt('Save As (name)?', 'My Plan') || '';
+    setName(planName);
+    const payload = { units, dives: computed, totals };
+    const { error } = await supabase
+      .from('plans')
+      .insert({ name: planName, kind: 'planner', data: payload });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    alert('Saved to cloud.');
+  }
 
   return (
     <main className="space-y-6">
-      <h1 className="text-2xl font-semibold">Dive Planner</h1>
-      <p className="text-sm text-zinc-600">
-        Educational tool. Not a substitute for formal training or a dive computer.
+      <h1 className="text-2xl font-semibold">Planner (Multi-Dive · EANx)</h1>
+      <p className="text-sm text-zinc-500">
+        Stack multiple dives. Computes EANx Best Mix (or use FO₂), MOD, EAD, PPO₂, CNS%
+        &amp; OTU. Educational use only.
       </p>
 
-      <section className="grid grid-cols-2 gap-4">
-        <label className="space-y-1 col-span-2">
-          <div className="text-sm">Label (tag)</div>
-          <input
-            className="input"
-            placeholder="Training, Rec, Tech, Checkout…"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-          />
-          <div className="hint">Optional short tag you’ll sort/filter by later.</div>
-        </label>
-
-        <label className="space-y-1 col-span-2">
-          <div className="text-sm">Site</div>
-          <input
-            className="input"
-            placeholder="Hole-in-the-Wall, Lighthouse Point…"
-            value={site}
-            onChange={(e) => setSite(e.target.value)}
-          />
-          <div className="hint">Optional site or boat name.</div>
-        </label>
-
+      <section className="grid grid-cols-3 gap-4">
         <label className="space-y-1">
           <div className="text-sm">Units</div>
           <select
             className="select"
             value={units}
-            onChange={(e) => setUnits(e.target.value as 'm' | 'ft')}
+            onChange={(e) => setUnits(e.target.value as Units)}
           >
             <option value="m">Meters</option>
             <option value="ft">Feet</option>
           </select>
         </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">{units === 'm' ? 'Depth (m)' : 'Depth (ft)'}</div>
+        <label className="space-y-1 col-span-2">
+          <div className="text-sm">Plan Name</div>
           <input
             className="input"
-            type="number"
-            value={depthUI}
-            onChange={(e) => setDepthInUI(toInt(e.target.value, depthUI))}
-            onBlur={() => setDepthInUI(depthUI)}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g., Reef double-dive"
           />
-          <div className="hint">
-            {units === 'm'
-              ? `${mToFt(depthUI)} ft`
-              : `${Math.round(depthUI / 3.28084)} m`}
-          </div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">Bottom Time (min)</div>
-          <input
-            className="input"
-            type="number"
-            value={timeCl}
-            onChange={(e) => setTime(toInt(e.target.value, timeCl))}
-          />
-          <div className="hint">Range: 1–300</div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">FO₂ (%)</div>
-          <input
-            className="input"
-            type="number"
-            value={fo2Cl}
-            onChange={(e) => setFo2Pct(toInt(e.target.value, fo2Cl))}
-          />
-          <div className="hint">Range: 21–40</div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">Max PPO₂</div>
-          <select
-            className="select"
-            value={ppCl}
-            onChange={(e) => setTargetPp(toFloat(e.target.value, ppCl))}
-          >
-            <option value={1.2}>1.2</option>
-            <option value={1.4}>1.4</option>
-            <option value={1.6}>1.6</option>
-          </select>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">SAC (L/min)</div>
-          <input
-            className="input"
-            type="number"
-            value={sacCl}
-            onChange={(e) => setSac(toInt(e.target.value, sacCl))}
-          />
-          <div className="hint">Typical: 8–30</div>
         </label>
       </section>
 
-      {!!errors.length && (
-        <div className="alert-error">
-          <div className="font-medium mb-1">Input errors</div>
-          <ul className="list-disc ml-5 text-sm">
-            {errors.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="space-y-4">
+        {computed.map((d, i) => (
+          <section key={i} className="card space-y-3">
+            <div className="flex items-center justify-between">
+              <input
+                className="input"
+                value={d.label || ''}
+                onChange={(e) => updDive(i, { label: e.target.value })}
+                placeholder={`Dive ${i + 1}`}
+              />
+              <button onClick={() => rmDive(i)} className="text-red-400 text-sm">
+                Remove
+              </button>
+            </div>
 
-      <section className="card space-y-2">
-        <div>
-          <b>PPO₂ @ depth:</b> {ppo2.toFixed(2)} ata
-        </div>
-        <div>
-          <b>MOD @ PPO₂ {ppCl}:</b> {mod} m ({mToFt(mod)} ft)
-        </div>
-        <div>
-          <b>Estimated gas used:</b> {gasL} L
-        </div>
-        <div className="pt-1 border-t mt-2">
-          <div>
-            <b>CNS%:</b> {cns}%
-          </div>
-          <div>
-            <b>OTU:</b> {otuScore}
-          </div>
-        </div>
-      </section>
+            <div className="grid grid-cols-3 gap-4">
+              <label className="space-y-1">
+                <div className="text-sm">
+                  {units === 'm' ? 'Depth (m)' : 'Depth (ft)'}
+                </div>
+                <input
+                  className="input"
+                  type="number"
+                  value={dives[i].depthUI}
+                  onChange={(e) => updDive(i, { depthUI: +e.target.value || 0 })}
+                />
+                <div className="hint">
+                  {units === 'm'
+                    ? `${mToFt(dives[i].depthUI)} ft`
+                    : `${ftToM(dives[i].depthUI)} m`}
+                </div>
+              </label>
 
-      {!!warnings.length && (
-        <div className="alert-warn">
-          <div className="font-medium mb-1">Warnings</div>
-          <ul className="list-disc ml-5 text-sm">
-            {warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+              <label className="space-y-1">
+                <div className="text-sm">Time (min)</div>
+                <input
+                  className="input"
+                  type="number"
+                  value={dives[i].timeMin}
+                  onChange={(e) => updDive(i, { timeMin: +e.target.value || 0 })}
+                />
+              </label>
 
-      <div className="flex gap-3 flex-wrap">
-        {user ? (
-          <button
-            className="btn btn-primary"
-            onClick={async () => {
-              try {
-                const row = {
-                  user_id: user.id,
-                  label: label || null,
-                  site: site || null,
-                  depth_m: depthM,
-                  time_min: timeCl,
-                  fo2_pct: fo2Cl,
-                  target_ppo2: +ppo2.toFixed(2),
-                  sac_lpm: sacCl,
-                  result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
-                  raw: {
-                    units,
-                    depthUI,
-                    depthM,
-                    time: timeCl,
-                    fo2Pct: fo2Cl,
-                    targetPp: ppCl,
-                    sac: sacCl,
-                    label,
-                    site,
-                  },
-                };
-                const { error } = await supabase.from('plans').insert(row);
-                if (error) throw error;
-                alert('Saved to cloud ✔');
-              } catch (e: any) {
-                alert(e.message || 'Cloud save failed');
-              }
-            }}
-          >
-            Save to Cloud
-          </button>
-        ) : (
-          <a className="btn" href="/login">
-            Sign in to save to cloud
-          </a>
-        )}
+              <label className="space-y-1">
+                <div className="text-sm">Max PPO₂ (ata)</div>
+                <select
+                  className="select"
+                  value={dives[i].ppo2Limit}
+                  onChange={(e) => updDive(i, { ppo2Limit: +e.target.value })}
+                >
+                  <option value={1.2}>1.2</option>
+                  <option value={1.3}>1.3</option>
+                  <option value={1.4}>1.4</option>
+                  <option value={1.6}>1.6</option>
+                </select>
+              </label>
 
-        <button
-          className="btn btn-primary"
-          onClick={() => {
-            const entry = {
-              ts: Date.now(),
-              ...payload,
-              result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
-            };
-            try {
-              const KEY = 'divemix_plans';
-              const prev = JSON.parse(localStorage.getItem(KEY) || '[]');
-              const next = [entry, ...prev].slice(0, 50);
-              localStorage.setItem(KEY, JSON.stringify(next));
-              alert('Plan saved ✔');
-            } catch {
-              alert('Could not save plan.');
-            }
-          }}
-        >
-          Save (Local)
-        </button>
+              <label className="space-y-1">
+                <div className="text-sm">FO₂ (%)</div>
+                <input
+                  className="input"
+                  type="number"
+                  value={dives[i].fo2Pct ?? NaN}
+                  placeholder={`${bestMixPct(d.depthM, dives[i].ppo2Limit)} (Best Mix)`}
+                  onChange={(e) =>
+                    updDive(i, {
+                      fo2Pct: isNaN(+e.target.value) ? undefined : +e.target.value || 0,
+                    })
+                  }
+                />
+                <div className="hint">Leave blank to use Best Mix.</div>
+              </label>
 
-        <button
-          className="btn"
-          onClick={() => {
-            const txt = [
-              `Dive Plan @ ${new Date().toLocaleString()}`,
-              label ? `Label: ${label}` : '',
-              site ? `Site: ${site}` : '',
-              `Units: ${units}`,
-              `Depth: ${depthUI} ${units} (${depthM} m)`,
-              `Time: ${timeCl} min`,
-              `FO2: ${fo2Cl}%  | Max PPO2: ${ppCl}`,
-              `SAC: ${sacCl} L/min`,
-              `--- Results ---`,
-              `PPO2: ${ppo2.toFixed(2)} ata`,
-              `MOD: ${mod} m (${Math.round(mod * 3.28084)} ft)`,
-              `Gas used: ${gasL} L`,
-              `CNS: ${cns}% | OTU: ${otuScore}`,
-            ]
-              .filter(Boolean)
-              .join('\n');
-            downloadText('divemix-plan.txt', txt);
-          }}
-        >
-          Export .txt
-        </button>
+              <label className="space-y-1">
+                <div className="text-sm">SAC (L/min)</div>
+                <input
+                  className="input"
+                  type="number"
+                  value={dives[i].sacLpm}
+                  onChange={(e) => updDive(i, { sacLpm: +e.target.value || 0 })}
+                />
+                <div className="hint">Used for simple gas at depth (bottom only)</div>
+              </label>
+            </div>
 
-        <button
-          className="btn"
-          onClick={() => {
-            const p = {
-              ts: Date.now(),
-              ...payload,
-              result: { ppo2: +ppo2.toFixed(2), mod, gas: gasL, cns, otu },
-            };
-            downloadJSON('divemix-plan.json', p);
-          }}
-        >
-          Export .json
-        </button>
+            {!!d.warns.length && (
+              <div className="alert-error">
+                <div className="font-medium mb-1">Warnings</div>
+                <ul className="list-disc ml-5 text-sm">
+                  {d.warns.map((w, j) => (
+                    <li key={j}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-        {/* Existing Share Link (planner?p=...) */}
-        <button
-          className="btn"
-          onClick={async () => {
-            const code = encodePlan(payload);
-            const url = `${location.origin}/planner?p=${code}`;
-            const ok = await copy(url);
-            alert(ok ? 'Share link copied' : url);
-          }}
-        >
-          Share Link
-        </button>
-
-        {/* New: Copy Public Link (/v/<code>) */}
-        <button
-          className="btn"
-          onClick={async () => {
-            try {
-              const code = encodePlan(payload);
-              const url = `${location.origin}/v/${code}`;
-              const ok = await copy(url);
-              alert(ok ? 'Public viewer link copied' : url);
-            } catch {
-              alert('Could not create public link');
-            }
-          }}
-        >
-          Copy Public Link
-        </button>
-
-        <a href="/saved" className="underline self-center">
-          View Saved
-        </a>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <div className="font-medium">Mix / Depth</div>
+                <div>
+                  FO₂: <b>{d.fo2}%</b>
+                </div>
+                <div>
+                  ATA: <b>{d.ata}</b>
+                </div>
+                <div>
+                  PPO₂@depth: <b>{d.po2AtDepth} ata</b>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="font-medium">Limits</div>
+                <div>
+                  MOD:{' '}
+                  <b>
+                    {d.mod} m / {mToFt(d.mod)} ft
+                  </b>
+                </div>
+                <div>
+                  EAD:{' '}
+                  <b>
+                    {d.ead} m / {mToFt(d.ead)} ft
+                  </b>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="font-medium">Exposure / Gas</div>
+                <div>
+                  CNS: <b>{d.cns}%</b>
+                </div>
+                <div>
+                  OTU: <b>{d.otus}</b>
+                </div>
+                <div>
+                  Gas used: <b>{d.gasL} L</b>
+                </div>
+              </div>
+            </div>
+          </section>
+        ))}
       </div>
 
-      {(() => {
-        try {
-          const { useSearchParams } = require('next/navigation');
-          const ExportPanel = require('@/components/ExportPanel').default;
-          const sp = useSearchParams();
-          let row = {};
-          try {
-            row = JSON.parse(sp.get('p') || '{}');
-          } catch {}
-          return <ExportPanel title="Dive Plan" row={row} />;
-        } catch (e) {
-          return null;
-        }
-      })()}
+      <button className="btn" onClick={addDive}>
+        + Add Dive
+      </button>
+
+      <section className="card space-y-2">
+        <div className="font-medium">Totals</div>
+        <div>
+          CNS total: <b>{totals.cns}%</b>
+        </div>
+        <div>
+          OTU total: <b>{totals.otus}</b>
+        </div>
+        <div>
+          Gas total: <b>{totals.gasL} L</b>
+        </div>
+      </section>
+
+      <div className="flex gap-2">
+        <button className="btn" onClick={saveLocal}>
+          Save
+        </button>
+        <button className="btn" onClick={saveCloud}>
+          Save to Cloud
+        </button>
+        <button className="btn" onClick={copyPublicLink}>
+          Copy Public Link
+        </button>
+      </div>
+
+      {/* Simple export using the current computed payload */}
+      <ExportPanel title="Multi-Dive Plan" row={dataPayload()} />
     </main>
   );
 }
