@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type Plan = {
   ts: number;
@@ -11,6 +11,8 @@ type Plan = {
   fo2Pct: number;
   targetPp: number;
   sac: number;
+  label?: string;
+  site?: string;
   result: { ppo2: number; mod: number; gas: number; cns?: number; otu?: number };
 };
 
@@ -19,6 +21,8 @@ const LOAD_KEY = 'divemix_plan_to_load';
 
 export default function Saved() {
   const [items, setItems] = useState<Plan[]>([]);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState<'new' | 'old' | 'deep' | 'long'>('new');
 
   useEffect(() => {
     try {
@@ -66,11 +70,59 @@ export default function Saved() {
     }
   }
 
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    let arr = items;
+    if (needle) {
+      arr = arr.filter((p) => {
+        const hay = [
+          new Date(p.ts).toLocaleString(),
+          p.label ?? '',
+          p.site ?? '',
+          `${p.depthM}`,
+          `${p.time}`,
+          `${p.fo2Pct}`,
+        ]
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(needle);
+      });
+    }
+    switch (sort) {
+      case 'new':
+        return [...arr].sort((a, b) => b.ts - a.ts);
+      case 'old':
+        return [...arr].sort((a, b) => a.ts - b.ts);
+      case 'deep':
+        return [...arr].sort((a, b) => b.depthM - a.depthM);
+      case 'long':
+        return [...arr].sort((a, b) => b.time - a.time);
+      default:
+        return arr;
+    }
+  }, [items, q, sort]);
+
   return (
     <main className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-2xl font-semibold">Saved Plans</h1>
         <div className="flex gap-2">
+          <input
+            className="input w-56"
+            placeholder="Search: label, site, depth…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <select
+            className="select"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as any)}
+          >
+            <option value="new">Newest</option>
+            <option value="old">Oldest</option>
+            <option value="deep">Deepest</option>
+            <option value="long">Longest time</option>
+          </select>
           <button onClick={exportAll} className="btn">
             Export All (.json)
           </button>
@@ -80,13 +132,13 @@ export default function Saved() {
         </div>
       </div>
 
-      {items.length === 0 ? (
+      {filtered.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          No saved plans yet. Create one in the Planner.
+          Nothing matches. Try clearing search or save a plan.
         </p>
       ) : (
         <ul className="space-y-3">
-          {items.map((p) => (
+          {filtered.map((p) => (
             <li key={p.ts} className="card">
               <div className="flex items-center justify-between">
                 <div className="text-xs text-zinc-500">
@@ -101,7 +153,21 @@ export default function Saved() {
                   </button>
                 </div>
               </div>
-              <div className="text-sm mt-1">
+
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                {p.label && (
+                  <span className="text-xs rounded border border-zinc-700 px-2 py-0.5 bg-zinc-900/60">
+                    {p.label}
+                  </span>
+                )}
+                {p.site && (
+                  <span className="text-xs rounded border border-zinc-700 px-2 py-0.5 bg-zinc-900/60">
+                    {p.site}
+                  </span>
+                )}
+              </div>
+
+              <div className="text-sm mt-2">
                 Depth: <b>{p.depthM} m</b> · Time: <b>{p.time} min</b> · FO₂{' '}
                 <b>{p.fo2Pct}%</b> · PPO₂ <b>{p.result.ppo2}</b> · MOD{' '}
                 <b>{p.result.mod} m</b> · Gas <b>{p.result.gas} L</b>
