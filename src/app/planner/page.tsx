@@ -94,24 +94,31 @@ export default function PlannerPage() {
 
   // Load last local plan on mount
   useEffect(() => {
-    try {
-      if (typeof window === 'undefined') return;
-      const raw = window.localStorage.getItem('plans');
-      if (!raw) return;
-      const arr = JSON.parse(raw);
-      if (!Array.isArray(arr) || arr.length === 0) return;
-      const last = arr[arr.length - 1];
+    if (typeof window === 'undefined') return;
 
-      if (last.units) setUnits(last.units as Units);
-      if (typeof last.tech === 'boolean') setTech(last.tech);
-      if (typeof last.gfLo === 'number') setGfLo(last.gfLo);
-      if (typeof last.gfHi === 'number') setGfHi(last.gfHi);
-      if (Array.isArray(last.dives) && last.dives.length > 0) {
-        setDives(last.dives);
+    const rafId = window.requestAnimationFrame(() => {
+      try {
+        const raw = window.localStorage.getItem('plans');
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr) || arr.length === 0) return;
+        const last = arr[arr.length - 1];
+
+        if (last.units) setUnits(last.units as Units);
+        if (typeof last.tech === 'boolean') setTech(last.tech);
+        if (typeof last.gfLo === 'number') setGfLo(last.gfLo);
+        if (typeof last.gfHi === 'number') setGfHi(last.gfHi);
+        if (Array.isArray(last.dives) && last.dives.length > 0) {
+          setDives(last.dives);
+        }
+      } catch (e) {
+        console.error('Failed to load local plans', e);
       }
-    } catch (e) {
-      console.error('Failed to load local plans', e);
-    }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const updDive = (idx: number, patch: Partial<Dive>) =>
@@ -134,8 +141,10 @@ export default function PlannerPage() {
   const rmDive = (idx: number) => setDives((ds) => ds.filter((_, i) => i !== idx));
 
   const computed: ComputedDive[] = useMemo(() => {
-    let lastEndN2 = 0; // placeholder for residual N2 loading proxy
-    return dives.map((d, i) => {
+    type Acc = { dives: ComputedDive[]; lastEndN2: number };
+    const initial: Acc = { dives: [], lastEndN2: 0 };
+    const acc = dives.reduce<Acc>((state, d, i) => {
+      const { lastEndN2 } = state;
       const depthM = units === 'm' ? d.depthUI : ftToM(d.depthUI);
       const ead = eadFromFo2(d.fo2Pct, depthM);
       const mod = modFromFo2(d.fo2Pct, d.ppo2Limit);
@@ -157,8 +166,7 @@ export default function PlannerPage() {
       const avgATA = 1 + depthM / 20;
       const gasL = Math.max(0, Math.round((d.sacLpm ?? 0) * d.timeMin * avgATA));
 
-      // Update residual proxy for next dive
-      lastEndN2 = Math.max(0, d.timeMin + rnt - ndl);
+      const nextResidual = Math.max(0, d.timeMin + rnt - ndl);
 
       // Optional tech preview
       let ndlTech: number | undefined;
@@ -181,7 +189,7 @@ export default function PlannerPage() {
         }
       }
 
-      return {
+      const computedDive: ComputedDive = {
         ...d,
         depthM,
         ead,
@@ -196,8 +204,14 @@ export default function PlannerPage() {
         ndlTech,
         schedule,
       };
-    });
-  }, [dives, units, tech, gfLo, gfHi]);
+
+      state.lastEndN2 = nextResidual;
+      state.dives.push(computedDive);
+      return state;
+    }, initial);
+
+    return acc.dives;
+  }, [dives, units, tech]);
 
   // ----- Export / Save helpers -----
   const dataPayload = () => {
@@ -302,9 +316,10 @@ export default function PlannerPage() {
       }
 
       alert('Saved to cloud');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Cloud save failed', e);
-      alert('Cloud save failed: ' + (e?.message || 'unknown error'));
+      const message = e instanceof Error ? e.message : 'unknown error';
+      alert('Cloud save failed: ' + message);
     }
   };
 

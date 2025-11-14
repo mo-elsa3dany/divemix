@@ -1,8 +1,10 @@
 'use client';
 
+type ExportableValue = string | number | boolean | null | undefined;
+
 type Props = {
   title: string;
-  row: Record<string, any>;
+  row: Record<string, ExportableValue>;
 };
 
 export default function ExportPanel({ title, row }: Props) {

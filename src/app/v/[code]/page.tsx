@@ -10,7 +10,7 @@ type PlanRow = {
   tech: boolean;
   gf_lo: number;
   gf_hi: number;
-  dives_json: any[];
+  dives_json: unknown[] | null;
   code: string;
 };
 
@@ -22,13 +22,16 @@ async function getPlan(code: string): Promise<PlanRow | null> {
     .limit(1)
     .maybeSingle();
   if (error) return null;
-  return data as any;
+  return (data ?? null) as PlanRow | null;
 }
 
+type RouteParams = { code?: string };
+type PageProps = { params?: RouteParams | Promise<RouteParams> };
+
 // ⬇️ Accept loose props (Next's typegen sometimes makes params a Promise)
-export default async function PublicPlan(props: any) {
-  const params = await props?.params; // handles plain object or Promise
-  const code = params?.code as string;
+export default async function PublicPlan({ params }: PageProps) {
+  const resolvedParams = params ? await params : undefined;
+  const code = resolvedParams?.code ?? '';
   const plan = code ? await getPlan(code) : null;
 
   if (!plan) {

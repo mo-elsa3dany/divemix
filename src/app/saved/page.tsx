@@ -10,7 +10,7 @@ type PlanRow = {
   label: string | null;
   site: string | null;
   created_at: string;
-  raw: any | null;
+  raw: Record<string, unknown> | null;
 };
 
 export default function SavedPlansPage() {
