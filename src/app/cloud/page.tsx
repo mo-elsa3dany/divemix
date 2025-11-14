@@ -6,9 +6,10 @@ import { supabase } from '../../lib/supabaseClient';
 
 export default function CloudCallbackPage() {
   useEffect(() => {
-    // This forces Supabase to inspect the URL and persist the session
     const syncSession = async () => {
       try {
+        // This makes Supabase inspect the URL hash, store the session, and
+        // set the auth cookie/localStorage on this origin.
         await supabase.auth.getUser();
       } catch (e) {
         console.error('Error syncing Supabase session on /cloud:', e);
