@@ -137,7 +137,7 @@ export default function NitroxPage() {
             <div className="text-lg font-semibold">
               {both.m.toFixed(1)} m / {both.ft.toFixed(0)} ft
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 mt-4">
               Maximum operating depth for this mix at PPO₂ {ppo2Limit.toFixed(1)} ata.
             </p>
           </div>
@@ -147,7 +147,7 @@ export default function NitroxPage() {
               Planned PPO₂
             </div>
             <div className="text-lg font-semibold">{ppo2AtPlan.toFixed(2)} ata</div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 mt-4">
               PPO₂ at {planBoth.m.toFixed(1)} m / {planBoth.ft.toFixed(0)} ft.
             </p>
           </div>
@@ -159,7 +159,7 @@ export default function NitroxPage() {
             <div className="text-lg font-semibold">
               {overLimit ? 'Over PPO₂ limit' : 'Within PPO₂ limit'}
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 mt-4">
               {overLimit
                 ? 'Reduce depth, lower FO₂, or accept a lower PPO₂ limit.'
                 : 'Mix and plan are within the PPO₂ limit at this depth.'}

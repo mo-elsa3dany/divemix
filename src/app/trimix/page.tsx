@@ -166,7 +166,7 @@ export default function TrimixPage() {
             <div className="text-lg font-semibold">
               {depthBoth.m.toFixed(1)} m / {depthBoth.ft.toFixed(0)} ft
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 mt-4">
               Ambient pressure: {ata.toFixed(2)} ata.
             </p>
           </div>
@@ -176,7 +176,7 @@ export default function TrimixPage() {
             <div className="text-lg font-semibold">
               {endBoth.m.toFixed(1)} m / {endBoth.ft.toFixed(0)} ft
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 mt-4">
               Equivalent narcotic depth assuming O₂ + N₂ narcotic, He non-narcotic.
             </p>
           </div>
@@ -188,7 +188,7 @@ export default function TrimixPage() {
             <div className="text-lg font-semibold">
               {ppo2.toFixed(2)} ata ({overPpo2 ? 'Over limit' : 'Within limit'})
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-500 mt-4">
               Adjust FO₂, depth, or PPO₂ limit to stay within your planning rules.
             </p>
           </div>

@@ -74,7 +74,7 @@ export default function LoginPage() {
       {status && <p className="text-sm text-emerald-400">{status}</p>}
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-zinc-500 mt-4">
         You&apos;ll be redirected back to DiveMix after clicking the link.
       </p>
     </main>

@@ -131,7 +131,7 @@ export default function SavedPlansPage() {
               <li key={p.id} className="card flex items-center justify-between gap-3">
                 <div className="space-y-1">
                   <div className="font-medium">{label}</div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-zinc-500 mt-4">
                     {kindLong} • {new Date(p.created_at).toLocaleString()}
                   </div>
                 </div>

@@ -44,7 +44,7 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-zinc-500 mt-4">
         Note: DiveMix is currently in active development. Always verify plans against your
         training agency guidance and dive computers.
       </p>

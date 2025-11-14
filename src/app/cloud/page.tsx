@@ -40,7 +40,7 @@ export default function CloudCallbackPage() {
         </Link>
       </div>
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-zinc-500 mt-4">
         If you refresh or reopen the site on this browser, you should stay signed in until
         you explicitly sign out or clear your browser data.
       </p>
