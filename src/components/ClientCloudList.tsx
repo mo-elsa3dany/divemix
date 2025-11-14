@@ -1,13 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { usePlans } from '@/lib/usePlans';
+import { usePlans, CloudPlanSummary } from '@/lib/usePlans';
 
 export default function ClientCloudList() {
   const plans = usePlans();
   if (!plans?.length) return <div className="muted">No cloud plans yet.</div>;
   return (
     <div className="space-y-2">
-      {plans.map((p: any) => (
+      {plans.map((p: CloudPlanSummary) => (
         <Link
           key={p.id}
           href={`/v/${p.code}`}

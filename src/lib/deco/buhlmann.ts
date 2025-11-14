@@ -96,13 +96,15 @@ export function ndlAtDepthMinutes(
   const step = 1; // minute resolution
 
   // current tissue tensions per comp (N2/He)
-  let tN2 = comps.map(() => initialN2);
-  let tHe = comps.map(() => initialHe);
+  const tN2 = comps.map(() => initialN2);
+  const tHe = comps.map(() => initialHe);
 
   for (t = 0; t <= maxMinutes; t += step) {
     // update tissues for this minute at depth
-    tN2 = tN2.map((p, i) => schreiner(p, piN2, LN2 / comps[i].halfN2, step));
-    tHe = tHe.map((p, i) => schreiner(p, piHe, LN2 / comps[i].halfHe, step));
+    for (let i = 0; i < comps.length; i++) {
+      tN2[i] = schreiner(tN2[i], piN2, LN2 / comps[i].halfN2, step);
+      tHe[i] = schreiner(tHe[i], piHe, LN2 / comps[i].halfHe, step);
+    }
 
     const gfVal = mixGF(ata, gf);
     // check ceilings
@@ -148,8 +150,8 @@ export function scheduleAscent(
   const PH2O = 0.0627;
 
   // Init tissues at surface, then load at bottom
-  let tN2 = comps.map(() => initialN2);
-  let tHe = comps.map(() => initialHe);
+  const tN2 = comps.map(() => initialN2);
+  const tHe = comps.map(() => initialHe);
   const LN2 = Math.log(2);
 
   function schreiner(p0: number, pinsp: number, half: number, dt: number) {

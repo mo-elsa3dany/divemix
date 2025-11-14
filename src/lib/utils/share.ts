@@ -1,4 +1,6 @@
-const buf = (globalThis as any).Buffer; // avoid TS error in browser
+import type { Buffer } from 'buffer';
+
+const buf = (globalThis as { Buffer?: typeof Buffer }).Buffer; // avoid TS error in browser
 
 export function encodePlan(obj: unknown): string {
   const json = JSON.stringify(obj);
