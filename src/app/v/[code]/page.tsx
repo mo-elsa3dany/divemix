@@ -1,65 +1,91 @@
-import { mToFt } from '@/lib/calc/gas';
-import { decodePlan } from '@/lib/utils/share';
+export const dynamic = 'force-dynamic';
 
-type Params = { code: string };
+import Link from 'next/link';
+import ExportPanel from '../../../components/ExportPanel';
+import { supa } from '../../../lib/supabase';
 
-export default async function PublicView({ params }: { params: Promise<Params> }) {
-  const { code } = await params;
+type PlanRow = {
+  id: string;
+  units: 'm' | 'ft';
+  tech: boolean;
+  gf_lo: number;
+  gf_hi: number;
+  dives_json: any[];
+  code: string;
+};
 
-  let plan: any | null = null;
-  let err: string | null = null;
+async function getPlan(code: string): Promise<PlanRow | null> {
+  const { data, error } = await supa
+    .from('plans')
+    .select('id, units, tech, gf_lo, gf_hi, dives_json, code')
+    .eq('code', code)
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  return data as any;
+}
 
-  try {
-    plan = decodePlan<any>(code);
-    if (!plan) throw new Error('Invalid code');
-  } catch (e: any) {
-    err = e?.message || 'Bad link';
+// ⬇️ Accept loose props (Next's typegen sometimes makes params a Promise)
+export default async function PublicPlan(props: any) {
+  const params = await props?.params; // handles plain object or Promise
+  const code = params?.code as string;
+  const plan = code ? await getPlan(code) : null;
+
+  if (!plan) {
+    return (
+      <main className="container max-w-3xl mx-auto p-6 space-y-4">
+        <h1 className="text-2xl font-semibold">Plan not found</h1>
+        <p className="text-zinc-500">Code: {code}</p>
+        <Link className="btn" href="/saved">
+          Back to Saved
+        </Link>
+      </main>
+    );
   }
 
-  if (err) return <main className="card">Link error: {err}</main>;
+  const payload = {
+    label: `Plan ${plan.code}`,
+    units: plan.units,
+    tech: plan.tech,
+    gf: `${plan.gf_lo}/${plan.gf_hi}`,
+    dives_count: plan.dives_json?.length ?? 0,
+  };
 
-  const depthM =
-    plan.units === 'ft'
-      ? Math.round((plan.depthUI ?? plan.depthM ?? 0) / 3.28084)
-      : (plan.depthM ?? plan.depthUI ?? 0);
+  const p = encodeURIComponent(
+    JSON.stringify({
+      units: plan.units,
+      tech: plan.tech,
+      gfLo: plan.gf_lo,
+      gfHi: plan.gf_hi,
+      dives: plan.dives_json ?? [],
+    }),
+  );
+  const plannerUrl = `/planner?p=${p}`;
 
   return (
-    <main className="space-y-4">
-      <h1 className="text-2xl font-semibold">Shared Dive Plan</h1>
-      <div className="card space-y-1">
-        {plan.label && (
-          <div>
-            <b>Label:</b> {plan.label}
-          </div>
-        )}
-        {plan.site && (
-          <div>
-            <b>Site:</b> {plan.site}
-          </div>
-        )}
+    <main className="container max-w-3xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Public Plan • {plan.code}</h1>
+        <Link className="btn" href={plannerUrl}>
+          Open in Planner
+        </Link>
+      </div>
+
+      <div className="card space-y-2">
         <div>
-          <b>Units:</b> {plan.units}
+          <b>Units:</b> {plan.units} · <b>Tech:</b> {String(plan.tech)} · <b>GF:</b>{' '}
+          {plan.gf_lo}/{plan.gf_hi}
         </div>
         <div>
-          <b>Depth:</b> {plan.depthUI ?? depthM} {plan.units} ({depthM} m /{' '}
-          {mToFt(depthM)} ft)
-        </div>
-        <div>
-          <b>Time:</b> {plan.time} min
-        </div>
-        <div>
-          <b>FO₂:</b> {plan.fo2Pct}% · <b>Max PPO₂:</b> {plan.targetPp}
-        </div>
-        <div>
-          <b>SAC:</b> {plan.sac} L/min
+          <b>Dives:</b> {plan.dives_json?.length ?? 0}
         </div>
       </div>
-      <a className="btn" href="/planner">
-        Open in Planner
-      </a>
-      <p className="hint">
-        Viewer only. Always verify with a dive computer and agency standards.
-      </p>
+
+      <ExportPanel title={`Plan ${plan.code}`} row={payload} />
+
+      <div className="text-sm text-zinc-500">
+        Shareable URL: {`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/v/${plan.code}`}
+      </div>
     </main>
   );
 }

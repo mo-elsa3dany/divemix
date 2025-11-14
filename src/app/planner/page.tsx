@@ -8,27 +8,28 @@ type Units = 'm' | 'ft';
 
 type Dive = {
   label?: string;
-  depthUI: number; // UI units depth
-  timeMin: number; // bottom time (min)
-  fo2Pct: number; // O2 percent (e.g., 32)
-  ppo2Limit: number; // PPO2 limit (ata)
-  sacLpm?: number; // L/min
-  siMin?: number; // surface interval (min)
+  depthUI: number; // depth in current UI units
+  timeMin: number; // bottom time in minutes
+  fo2Pct: number; // oxygen fraction percentage (e.g., 32)
+  ppo2Limit: number; // PPO2 limit (e.g., 1.4)
+  sacLpm?: number; // surface air consumption in L/min
+  siMin?: number; // surface interval before this dive (min)
 };
 
 type ComputedDive = Dive & {
-  depthM: number;
-  ead: number;
-  mod: number;
-  po2AtDepth: number;
-  ndl: number;
-  rnt: number;
-  overNdL?: boolean;
-  cns: number;
-  otus: number;
-  gasL: number;
-  ndlTech?: number;
+  depthM: number; // depth in meters
+  ead: number; // equivalent air depth (m)
+  mod: number; // maximum operating depth (m)
+  po2AtDepth: number; // PPO2 at planned depth (ata)
+  ndl: number; // NDL (min) using EAD->Air table
+  rnt: number; // residual nitrogen time (min) (placeholder calc)
+  overNdL?: boolean; // planned time + RNT > NDL
+  cns: number; // CNS %
+  otus: number; // OTUs
+  gasL: number; // total gas used in liters (rough)
+  ndlTech?: number; // optional tech-mode NDL
   schedule?: {
+    // optional schedule for tech/deco preview
     stops: { depthM: number; timeMin: number }[];
     ascentMin: number;
     decoMin: number;
@@ -41,6 +42,7 @@ const mToFt = (m: number) => Math.round(m * 3.28084);
 const ftToM = (ft: number) => Math.round((ft / 3.28084) * 10) / 10;
 const ataAtDepthM = (m: number) => 1 + m / 10;
 
+// Very coarse Air NDL table (EAD in meters) — conservative placeholders
 function ndlAirByDepth(eadM: number): number {
   const d = Math.max(0, Math.round(eadM));
   if (d <= 12) return 147;
@@ -54,14 +56,16 @@ function ndlAirByDepth(eadM: number): number {
   if (d <= 32) return 16;
   if (d <= 35) return 14;
   if (d <= 40) return 9;
-  return 0;
+  return 0; // beyond recreational NDL
 }
 
+// EAD from FO2 and actual depth (m): EAD = ((FN2/0.79)*(D+10)) - 10
 const eadFromFo2 = (fo2Pct: number, depthM: number) => {
   const fn2 = 1 - fo2Pct / 100;
   return Math.max(0, Math.round(((fn2 / 0.79) * (depthM + 10) - 10) * 10) / 10);
 };
 
+// MOD in meters for given FO2 and PPO2 limit: MOD = (PPO2/FO2 - 1) * 10
 const modFromFo2 = (fo2Pct: number, ppo2Limit: number) => {
   const fo2 = fo2Pct / 100;
   if (fo2 <= 0) return 0;
@@ -107,7 +111,7 @@ export default function PlannerPage() {
   const rmDive = (idx: number) => setDives((ds) => ds.filter((_, i) => i !== idx));
 
   const computed: ComputedDive[] = useMemo(() => {
-    let lastEndN2 = 0;
+    let lastEndN2 = 0; // placeholder for residual N2 loading proxy
     return dives.map((d, i) => {
       const depthM = units === 'm' ? d.depthUI : ftToM(d.depthUI);
       const ead = eadFromFo2(d.fo2Pct, depthM);
@@ -115,24 +119,29 @@ export default function PlannerPage() {
       const po2AtDepth = +((d.fo2Pct / 100) * ataAtDepthM(depthM)).toFixed(2);
       const ndl = ndlAirByDepth(ead);
 
+      // Very rough RNT (placeholder): decay previous proxy with SI, never negative
       const si = i === 0 ? (d.siMin ?? 0) : (dives[i].siMin ?? 0);
       const rnt = Math.max(0, Math.round(lastEndN2 * 0.5 ** (si / 60)));
       const overNdL = d.timeMin + rnt > ndl && ndl > 0;
 
+      // CNS/OTU super coarse placeholders
       const cns = Math.min(100, Math.round((po2AtDepth / 1.6) * d.timeMin));
       const otus = Math.round(
         (po2AtDepth - 0.5 > 0 ? po2AtDepth - 0.5 : 0) ** 2 * d.timeMin,
       );
 
+      // Gas in liters (approx avg ATA ~ 1 + depth/20)
       const avgATA = 1 + depthM / 20;
       const gasL = Math.max(0, Math.round((d.sacLpm ?? 0) * d.timeMin * avgATA));
 
+      // Update residual proxy for next dive
       lastEndN2 = Math.max(0, d.timeMin + rnt - ndl);
 
+      // Optional tech preview
       let ndlTech: number | undefined;
       let schedule: ComputedDive['schedule'] | undefined;
       if (tech) {
-        ndlTech = Math.max(0, Math.round(ndl * 0.9));
+        ndlTech = Math.max(0, Math.round(ndl * 0.9)); // placeholder slightly stricter
         if (overNdL) {
           const decoMin = Math.max(3, Math.round((d.timeMin + rnt - ndl) / 2));
           const stops = [
@@ -143,7 +152,7 @@ export default function PlannerPage() {
               timeMin: Math.max(0, decoMin - 2 * Math.max(0, Math.round(decoMin / 3))),
             },
           ].filter((s) => s.timeMin > 0);
-          const ascentMin = Math.max(1, Math.round(depthM / 9));
+          const ascentMin = Math.max(1, Math.round(depthM / 9)); // ~9 m/min ascent
           const runtimeMin = d.timeMin + ascentMin + decoMin;
           schedule = { stops, ascentMin, decoMin, runtimeMin };
         }
@@ -204,16 +213,11 @@ export default function PlannerPage() {
 
   const saveCloud = async () => {
     try {
-      const res = await fetch('/api/plans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ units, tech, gfLo, gfHi, dives }),
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j?.error || 'Save failed');
-      alert(`Saved: code ${j.data.code}`);
-    } catch (e: any) {
-      alert(e?.message || 'Cloud save failed');
+      // stub for now; we’ll wire Supabase later
+      await Promise.resolve();
+      alert('Saved to cloud (stub)');
+    } catch {
+      alert('Cloud save failed');
     }
   };
 
@@ -439,9 +443,6 @@ export default function PlannerPage() {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button className="btn" onClick={saveLocal}>
           Save
-        </button>
-        <button className="btn" onClick={saveCloud}>
-          Save to Cloud
         </button>
         <button className="btn" onClick={copyPublicLink}>
           Copy Public Link

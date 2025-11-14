@@ -1,65 +1,53 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
-import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
-
-export default function Pricing() {
-  const [email, setEmail] = useState('');
-  const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [last, setLast] = useState<number>(0);
-
-  async function join() {
-    const now = Date.now();
-    if (now - last < 10_000) {
-      setMsg('Easy tiger — try again in a few seconds.');
-      return;
-    }
-    if (!email.includes('@')) {
-      setMsg('Enter a valid email.');
-      return;
-    }
-    setBusy(true);
-    setMsg(null);
-    try {
-      const { error } = await supabase.from('waitlist').insert({ email });
-      if (error) {
-        if ((error.message || '').toLowerCase().includes('duplicate'))
-          setMsg('You’re already on the list. 👍');
-        else throw error;
-      } else {
-        setMsg('All set — we’ll email you when Pro opens.');
-        setEmail('');
-        setLast(now);
-      }
-    } catch (e: any) {
-      setMsg(e.message || 'Could not join. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
+export default function PricingPage() {
   return (
-    <main className="space-y-6">
-      <h1 className="text-2xl font-semibold">Pricing</h1>
-      <div className="card space-y-3">
+    <main className="container mx-auto max-w-3xl p-4 space-y-8">
+      <header className="space-y-2">
+        <h1 className="text-3xl font-semibold">Pricing</h1>
         <p className="text-sm text-zinc-400">
-          Free: Planner + Nitrox. Pro soon: cloud presets, share gallery, export packs,
-          and more.
+          Simple, transparent, and focused on giving divers solid tools.
         </p>
-        <div className="grid gap-2 max-w-md">
-          <input
-            className="input"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <button className="btn btn-primary" disabled={busy} onClick={join}>
-            {busy ? 'Adding…' : 'Join waitlist'}
-          </button>
-          {msg && <div className="hint">{msg}</div>}
+      </header>
+
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="border border-zinc-700 rounded-lg p-4 bg-zinc-900/40 flex flex-col justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Launch Tier</h2>
+            <p className="mt-1 text-sm text-zinc-400">Free while in beta.</p>
+            <ul className="mt-3 text-sm space-y-1 text-zinc-300">
+              <li>• Full access to Planner, Nitrox, and Trimix tools</li>
+              <li>• Local saves in your browser</li>
+              <li>• Cloud-saved plans for logged-in users</li>
+              <li>• Public share links for plans</li>
+            </ul>
+          </div>
+          <div className="mt-4 text-sm text-zinc-500">
+            No credit card. No subscriptions (yet).
+          </div>
         </div>
-      </div>
+
+        <div className="border border-zinc-800 rounded-lg p-4 bg-zinc-950/40 flex flex-col justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Pro (Coming Soon)</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              For divers and teams who want more.
+            </p>
+            <ul className="mt-3 text-sm space-y-1 text-zinc-300">
+              <li>• Advanced gas planning features</li>
+              <li>• Expanded history & audit trails</li>
+              <li>• Team / shop accounts</li>
+              <li>• Priority updates and support</li>
+            </ul>
+          </div>
+          <div className="mt-4 text-sm text-zinc-500">
+            We&apos;ll announce pricing before anything goes live.
+          </div>
+        </div>
+      </section>
+
+      <p className="text-xs text-zinc-500">
+        Note: DiveMix is currently in active development. Always verify plans against your
+        training agency guidance and dive computers.
+      </p>
     </main>
   );
 }

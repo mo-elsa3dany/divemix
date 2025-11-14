@@ -1,179 +1,220 @@
 'use client';
-import ExportPanel from '@/components/ExportPanel';
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useMemo, useState } from 'react';
 
-function ftToM(ft: number) {
-  return Math.round(ft / 3.28084);
+import { useState } from 'react';
+import ExportPanel from '../../components/ExportPanel';
+
+type Units = 'm' | 'ft';
+
+function modFromFo2(fo2Pct: number, ppo2: number, units: Units) {
+  const fo2 = fo2Pct / 100;
+  if (fo2 <= 0) return 0;
+  const ata = ppo2 / fo2;
+  if (units === 'm') {
+    return Math.max(0, (ata - 1) * 10);
+  } else {
+    return Math.max(0, (ata - 1) * 33);
+  }
 }
-function mToFt(m: number) {
-  return Math.round(m * 3.28084);
+
+function toBoth(depth: number, units: Units) {
+  if (units === 'm') {
+    const m = depth;
+    const ft = depth * 3.28084;
+    return { m, ft };
+  } else {
+    const ft = depth;
+    const m = depth / 3.28084;
+    return { m, ft };
+  }
 }
 
-export default function Nitrox() {
-  const [units, setUnits] = useState<'m' | 'ft'>('m');
-  const [depthUI, setDepthUI] = useState(30); // 30m / 100ft
-  const [maxPPO2, setMaxPPO2] = useState(1.4);
-  const [targetFO2, setTargetFO2] = useState(32); // %
-  const [startO2, setStartO2] = useState(21); // %
-  const [cylPress, setCylPress] = useState(200); // bar or psi? -> treat as abstract for % calc
+export default function NitroxPage() {
+  const [units, setUnits] = useState<Units>('m');
+  const [fo2Pct, setFo2Pct] = useState(32); // EAN32 default
+  const [ppo2Limit, setPpo2Limit] = useState(1.4);
+  const [planDepth, setPlanDepth] = useState(30); // 30m / 100ft default
 
-  // Hydrostatic pressure in ata at depth: (depth/10)+1 in m; (ft/33)+1 in ft
-  const depthM = units === 'm' ? depthUI : ftToM(depthUI);
-  const ata = +(depthM / 10 + 1).toFixed(2);
+  const mod = modFromFo2(fo2Pct, ppo2Limit, units);
+  const both = toBoth(mod, units);
+  const planBoth = toBoth(planDepth, units);
+  const ataAtPlan = units === 'm' ? planDepth / 10 + 1 : planDepth / 33 + 1;
+  const ppo2AtPlan = (fo2Pct / 100) * ataAtPlan;
+  const overLimit = ppo2AtPlan > ppo2Limit;
 
-  // Best mix for given PPO2 and depth: FO2 = PPO2 / ata
-  const bestMix = Math.max(21, Math.min(40, Math.round((maxPPO2 / ata) * 100)));
-  // MOD for a given FO2 and PPO2: depth(m) = 10*(PPO2/FO2 - 1)
-  const modM = Math.round(10 * (maxPPO2 / Math.max(0.21, targetFO2 / 100) - 1));
-  const modFt = mToFt(modM);
-
-  // Partial pressure top-up from a starting FO2 to target FO2
-  // %O2 to add ≈ (Target% - Start%) / (100 - Start%) of the remaining pressure
-  const o2AddPct = Math.max(
-    0,
-    Math.min(100, ((targetFO2 - startO2) / Math.max(1, 100 - startO2)) * 100),
-  );
-  const o2AddBar = Math.round((o2AddPct / 100) * cylPress);
-  const airTopBar = cylPress - o2AddBar;
-
-  const issues: string[] = [];
-  if (targetFO2 < 21 || targetFO2 > 40) issues.push('Target FO₂ must be 21–40%.');
-  if (startO2 < 21 || startO2 > 40) issues.push('Start FO₂ must be 21–40%.');
-  if (maxPPO2 < 1.0 || maxPPO2 > 1.6) issues.push('Max PPO₂ range is 1.0–1.6.');
+  const exportRow = {
+    tool: 'Nitrox',
+    units,
+    fo2_pct: fo2Pct,
+    ppo2_limit: ppo2Limit,
+    plan_depth_ui: planDepth,
+    plan_depth_m: planBoth.m.toFixed(1),
+    plan_depth_ft: planBoth.ft.toFixed(0),
+    mod_m: both.m.toFixed(1),
+    mod_ft: both.ft.toFixed(0),
+    ppo2_at_plan: +ppo2AtPlan.toFixed(2),
+    over_limit: overLimit ? 'YES' : 'NO',
+  };
 
   return (
-    <main className="space-y-6">
-      <h1 className="text-2xl font-semibold">Nitrox</h1>
-      <p className="text-sm text-zinc-500">
-        Best Mix, MOD, and simple partial-pressure top-up. Educational use only.
-      </p>
-
-      <section className="grid grid-cols-2 gap-4">
-        <label className="space-y-1">
-          <div className="text-sm">Units</div>
-          <select
-            className="select"
-            value={units}
-            onChange={(e) => setUnits(e.target.value as any)}
-          >
-            <option value="m">Meters</option>
-            <option value="ft">Feet</option>
-          </select>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">{units === 'm' ? 'Depth (m)' : 'Depth (ft)'}</div>
-          <input
-            className="input"
-            type="number"
-            value={depthUI}
-            onChange={(e) => setDepthUI(+e.target.value || 0)}
-          />
-          <div className="hint">
-            {units === 'm' ? `${mToFt(depthUI)} ft` : `${ftToM(depthUI)} m`}
-          </div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">Max PPO₂</div>
-          <select
-            className="select"
-            value={maxPPO2}
-            onChange={(e) => setMaxPPO2(+e.target.value)}
-          >
-            <option value={1.2}>1.2</option>
-            <option value={1.4}>1.4</option>
-            <option value={1.6}>1.6</option>
-          </select>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">Target FO₂ (%)</div>
-          <input
-            className="input"
-            type="number"
-            value={targetFO2}
-            onChange={(e) => setTargetFO2(+e.target.value || 0)}
-          />
-          <div className="hint">Usual rec range: 32–36%</div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">Starting FO₂ (%)</div>
-          <input
-            className="input"
-            type="number"
-            value={startO2}
-            onChange={(e) => setStartO2(+e.target.value || 0)}
-          />
-          <div className="hint">Air is 21%</div>
-        </label>
-
-        <label className="space-y-1">
-          <div className="text-sm">Cylinder Pressure (for % calc)</div>
-          <input
-            className="input"
-            type="number"
-            value={cylPress}
-            onChange={(e) => setCylPress(+e.target.value || 0)}
-          />
-          <div className="hint">Bar or psi — used proportionally</div>
-        </label>
-      </section>
-
-      {!!issues.length && (
-        <div className="alert-error">
-          <div className="font-medium mb-1">Input errors</div>
-          <ul className="list-disc ml-5 text-sm">
-            {issues.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <section className="card space-y-2">
-        <div>
-          <b>Ambient pressure @ depth:</b> {ata} ata
-        </div>
-        <div>
-          <b>Best Mix @ PPO₂ {maxPPO2}:</b> {bestMix}% O₂
-        </div>
-        <div>
-          <b>
-            MOD for {targetFO2}% @ PPO₂ {maxPPO2}:
-          </b>{' '}
-          {modM} m / {modFt} ft
-        </div>
-      </section>
-
-      <section className="card space-y-2">
-        <div className="font-medium">Partial-Pressure Top-Up (rough)</div>
-        <div>
-          <b>O₂ to add:</b> {Math.round(o2AddPct)}% of remaining → ≈ {o2AddBar} (same
-          units as input)
-        </div>
-        <div>
-          <b>Then top with air:</b> ≈ {airTopBar}
-        </div>
-        <p className="hint">
-          Always analyze; this is a simplified planning aid, not a fill procedure.
+    <main className="container max-w-4xl mx-auto p-4 space-y-6">
+      <header className="space-y-2">
+        <h1 className="text-2xl md:text-3xl font-semibold">Nitrox Mixer</h1>
+        <p className="text-zinc-500 text-sm md:text-base">
+          Set your planned depth, FO₂, and PPO₂ limit to see your MOD and whether the mix
+          is acceptable for the dive. Use this as a planning tool before you go to the gas
+          panel.
         </p>
+      </header>
+
+      <section className="card space-y-4">
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="space-y-1">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">Units</div>
+            <div className="inline-flex rounded border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setUnits('m')}
+                className={`px-3 py-1 text-sm ${units === 'm' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}`}
+              >
+                m / bar
+              </button>
+              <button
+                type="button"
+                onClick={() => setUnits('ft')}
+                className={`px-3 py-1 text-sm ${units === 'ft' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}`}
+              >
+                ft / psi
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs uppercase tracking-wide text-zinc-500">
+              Planned depth ({units})
+            </label>
+            <input
+              type="number"
+              className="input"
+              value={planDepth}
+              min={0}
+              onChange={(e) => setPlanDepth(+e.target.value || 0)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs uppercase tracking-wide text-zinc-500">
+              FO₂ (%)
+            </label>
+            <input
+              type="number"
+              className="input"
+              value={fo2Pct}
+              min={21}
+              max={40}
+              onChange={(e) => setFo2Pct(+e.target.value || 0)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs uppercase tracking-wide text-zinc-500">
+              PPO₂ limit (ata)
+            </label>
+            <input
+              type="number"
+              step="0.1"
+              className="input"
+              value={ppo2Limit}
+              min={1.2}
+              max={1.6}
+              onChange={(e) => setPpo2Limit(+e.target.value || 0)}
+            />
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="card border bg-zinc-50/60 dark:bg-zinc-900/40 space-y-1">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">MOD</div>
+            <div className="text-lg font-semibold">
+              {both.m.toFixed(1)} m / {both.ft.toFixed(0)} ft
+            </div>
+            <p className="text-xs text-zinc-500">
+              Maximum operating depth for this mix at PPO₂ {ppo2Limit.toFixed(1)} ata.
+            </p>
+          </div>
+
+          <div className="card border bg-zinc-50/60 dark:bg-zinc-900/40 space-y-1">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">
+              Planned PPO₂
+            </div>
+            <div className="text-lg font-semibold">{ppo2AtPlan.toFixed(2)} ata</div>
+            <p className="text-xs text-zinc-500">
+              PPO₂ at {planBoth.m.toFixed(1)} m / {planBoth.ft.toFixed(0)} ft.
+            </p>
+          </div>
+
+          <div
+            className={`card border space-y-1 ${overLimit ? 'bg-red-50 dark:bg-red-900/30' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}
+          >
+            <div className="text-xs uppercase tracking-wide text-zinc-500">Status</div>
+            <div className="text-lg font-semibold">
+              {overLimit ? 'Over PPO₂ limit' : 'Within PPO₂ limit'}
+            </div>
+            <p className="text-xs text-zinc-500">
+              {overLimit
+                ? 'Reduce depth, lower FO₂, or accept a lower PPO₂ limit.'
+                : 'Mix and plan are within the PPO₂ limit at this depth.'}
+            </p>
+          </div>
+        </div>
+
+        <ExportPanel title="Nitrox Mix" row={exportRow} />
       </section>
 
-      <ExportPanel
-        title="Nitrox Plan"
-        row={{
-          units,
-          depth: depthUI + ' ' + units,
-          depth_m: units === 'm' ? depthUI : Math.round(depthUI / 3.28084),
-          ppo2_limit: maxPPO2,
-          target_fo2_pct: targetFO2,
-          start_fo2_pct: startO2,
-        }}
-      />
+      <section className="card space-y-2">
+        <h2 className="text-lg font-semibold">What to do with these numbers</h2>
+        <p className="text-sm text-zinc-500">
+          This checklist is aimed at certified gas blenders. Always follow your agency
+          procedures and local regulations.
+        </p>
+        <ol className="list-decimal list-inside space-y-1 text-sm">
+          <li>Confirm the planned depth, FO₂, and PPO₂ limit in the calculator above.</li>
+          <li>Check that the PPO₂ at the planned depth is within your chosen limit.</li>
+          <li>
+            At the filling station, verify the cylinder is in test, correctly labeled, and
+            suitable for oxygen-enriched gas.
+          </li>
+          <li>
+            Decide your blending method (partial pressure / continuous) and set the panel
+            accordingly.
+          </li>
+          <li>
+            For partial-pressure blending:
+            <ul className="list-disc list-inside ml-4 space-y-1">
+              <li>Calculate or confirm the required O₂ pressure for your target FO₂.</li>
+              <li>
+                Slowly add O₂ while monitoring cylinder temperature and panel pressure.
+              </li>
+              <li>Top with clean air to final working pressure.</li>
+            </ul>
+          </li>
+          <li>
+            Allow the cylinder to cool to ambient temperature, then analyze FO₂ with a
+            calibrated analyzer.
+          </li>
+          <li>
+            Compare analyzed FO₂ to the planned FO₂. If it is out of tolerance, adjust and
+            re-analyze.
+          </li>
+          <li>
+            Label the cylinder with analyzed FO₂, MOD, date, and initials as per your
+            procedures.
+          </li>
+          <li>
+            Brief the diver on analyzed FO₂, MOD, and any depth limits based on this mix
+            before the dive.
+          </li>
+        </ol>
+      </section>
     </main>
   );
 }

@@ -1,64 +1,63 @@
 'use client';
 
-type Props = { title?: string; row: Record<string, any> };
+type Props = {
+  title: string;
+  row: Record<string, any>;
+};
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-const btn =
-  'px-3 py-2 rounded-md border text-sm ' +
-  'bg-white text-zinc-900 border-zinc-300 hover:bg-zinc-50 ' +
-  'dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800';
-
-export default function ExportPanel({ title = 'Export', row }: Props) {
-  const exportCSV = () => {
-    if (!row || typeof row !== 'object') {
-      alert('Nothing to export.');
-      return;
-    }
-    const headers = Object.keys(row);
-    const values = headers.map((k) => {
-      const s = row[k] == null ? '' : String(row[k]).replace(/"/g, '""');
-      return /[",\n]/.test(s) ? `"${s}"` : s;
-    });
-    const csv = headers.join(',') + '\n' + values.join(',');
-    downloadBlob(
-      new Blob([csv], { type: 'text/csv;charset=utf-8' }),
-      `${title.toLowerCase().replace(/\s+/g, '-')}.csv`,
-    );
-  };
-
-  const exportPDF = async () => {
+export default function ExportPanel({ title, row }: Props) {
+  const exportCsv = () => {
     try {
-      const res = await fetch('/api/pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, rows: [row] }),
+      const rows = [row];
+      if (!rows.length) {
+        alert('Nothing to export');
+        return;
+      }
+      const headers = Object.keys(rows[0] ?? {});
+      if (!headers.length) {
+        alert('Nothing to export');
+        return;
+      }
+
+      const lines = [
+        headers.join(','),
+        ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? '')).join(',')),
+      ];
+
+      const blob = new Blob([lines.join('\n')], {
+        type: 'text/csv;charset=utf-8;',
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      downloadBlob(blob, `${title.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title.replace(/\s+/g, '_').toLowerCase()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
-      alert('PDF export failed. CSV still works.');
+      alert('CSV export failed');
     }
+  };
+
+  const exportPdfSoon = () => {
+    alert('PDF export coming soon.\nFor now, export CSV or take a screenshot.');
   };
 
   return (
-    <div className="mt-3 inline-flex flex-wrap items-center gap-2">
-      <button className={btn} onClick={exportCSV}>
+    <div className="mt-4 flex flex-wrap gap-2">
+      <button type="button" className="btn" onClick={exportCsv}>
         Export CSV
       </button>
-      <button className={btn} onClick={exportPDF}>
-        Export PDF
+      <button
+        type="button"
+        className="btn-outline opacity-60 cursor-not-allowed"
+        disabled
+        onClick={exportPdfSoon}
+      >
+        Export PDF (coming soon)
       </button>
     </div>
   );
