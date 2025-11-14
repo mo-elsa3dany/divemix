@@ -1,72 +1,82 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
-import { useSupabaseAuth } from '@/lib/supabase/useAuth';
 
-export default function Login() {
-  const { user } = useSupabaseAuth();
+import { FormEvent, useState } from 'react';
+import { supabase } from '../../lib/supabaseClient';
+
+export default function LoginPage() {
   const [email, setEmail] = useState('');
-  const [msg, setMsg] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (user) {
-    return (
-      <main className="space-y-4">
-        <h1 className="text-2xl font-semibold">You’re signed in</h1>
-        <p className="hint">{user.email}</p>
-        <div className="flex gap-2">
-          <a className="btn" href="/cloud">
-            Go to My Plans
-          </a>
-          <button
-            className="btn"
-            onClick={async () => {
-              await supabase.auth.signOut();
-              location.reload();
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </main>
-    );
-  }
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setStatus(null);
+    setError(null);
+    setBusy(true);
+
+    try {
+      let origin = process.env.NEXT_PUBLIC_SITE_URL;
+      if (typeof window !== 'undefined') {
+        origin = window.location.origin;
+      }
+
+      const redirectTo = `${origin}/cloud`;
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      });
+
+      if (error) {
+        console.error(error);
+        setError('Could not send magic link. Please try again.');
+      } else {
+        setStatus('Magic link sent. Check your email to complete sign-in.');
+      }
+    } catch (e) {
+      console.error(e);
+      setError('Unexpected error. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <main className="space-y-4">
-      <h1 className="text-2xl font-semibold">Sign in</h1>
-      <p className="hint">We’ll send a magic link to your email.</p>
-      <div className="grid gap-3 max-w-md">
-        <input
-          className="input"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <button
-          className="btn btn-primary"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              const { error } = await supabase.auth.signInWithOtp({
-                email,
-                options: { emailRedirectTo: window.location.origin + '/cloud' },
-              });
-              if (error) throw error;
-              setMsg('Check your inbox for the sign-in link.');
-            } catch (e: any) {
-              setMsg(e.message || 'Failed to send link');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+    <main className="container mx-auto max-w-md p-4 space-y-6">
+      <header className="space-y-2">
+        <h1 className="text-2xl md:text-3xl font-semibold">Sign in</h1>
+        <p className="text-sm text-zinc-400">
+          Enter your email to receive a one-time magic link. No passwords.
+        </p>
+      </header>
+
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <label className="block text-sm">
+          <span className="mb-1 block text-zinc-300">Email</span>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-zinc-400"
+            placeholder="you@example.com"
+          />
+        </label>
+
+        <button type="submit" className="btn" disabled={busy}>
           {busy ? 'Sending…' : 'Send magic link'}
         </button>
-        {msg && <div className="card">{msg}</div>}
-      </div>
+      </form>
+
+      {status && <p className="text-sm text-emerald-400">{status}</p>}
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      <p className="text-xs text-zinc-500">
+        You&apos;ll be redirected back to DiveMix after clicking the link.
+      </p>
     </main>
   );
 }

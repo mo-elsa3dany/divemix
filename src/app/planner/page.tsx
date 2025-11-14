@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import ExportPanel from '../../components/ExportPanel';
+import { supabase } from '../../lib/supabaseClient';
 
 // ---------- Types ----------
 type Units = 'm' | 'ft';
@@ -90,6 +91,28 @@ export default function PlannerPage() {
       siMin: 60,
     },
   ]);
+
+  // Load last local plan on mount
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem('plans');
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr) || arr.length === 0) return;
+      const last = arr[arr.length - 1];
+
+      if (last.units) setUnits(last.units as Units);
+      if (typeof last.tech === 'boolean') setTech(last.tech);
+      if (typeof last.gfLo === 'number') setGfLo(last.gfLo);
+      if (typeof last.gfHi === 'number') setGfHi(last.gfHi);
+      if (Array.isArray(last.dives) && last.dives.length > 0) {
+        setDives(last.dives);
+      }
+    } catch (e) {
+      console.error('Failed to load local plans', e);
+    }
+  }, []);
 
   const updDive = (idx: number, patch: Partial<Dive>) =>
     setDives((ds) => ds.map((d, i) => (i === idx ? { ...d, ...patch } : d)));
@@ -202,23 +225,92 @@ export default function PlannerPage() {
 
   const saveLocal = () => {
     try {
-      const plans = JSON.parse(localStorage.getItem('plans') || '[]');
-      plans.push({ units, tech, gfLo, gfHi, dives });
-      localStorage.setItem('plans', JSON.stringify(plans));
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem('plans');
+      const plans = raw ? JSON.parse(raw) : [];
+      const arr = Array.isArray(plans) ? plans : [];
+      arr.push({ units, tech, gfLo, gfHi, dives });
+      window.localStorage.setItem('plans', JSON.stringify(arr));
       alert('Saved locally');
-    } catch {
+    } catch (e) {
+      console.error('Could not save locally', e);
       alert('Could not save locally');
     }
   };
 
   const saveCloud = async () => {
-    try {
-      // stub for now; we’ll wire Supabase later
-      await Promise.resolve();
-      alert('Saved to cloud (stub)');
-    } catch {
-      alert('Cloud save failed');
+    const d = computed[0];
+    if (!d) {
+      alert('Nothing to save');
+      return;
     }
+
+    try {
+      // Ensure we’re actually logged in
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) {
+        console.error('getUser error', userError);
+      }
+      if (!user) {
+        alert('Cloud save failed: not signed in');
+        return;
+      }
+
+      const payload = {
+        kind: 'planner',
+        units,
+        label: d.label || null,
+        site: d.label || null,
+        depth_m: d.depthM,
+        time_min: d.timeMin,
+        fo2_pct: d.fo2Pct,
+        target_ppo2: d.ppo2Limit,
+        sac_lpm: d.sacLpm ?? null,
+        tech,
+        gf_lo: gfLo,
+        gf_hi: gfHi,
+        dives_json: dives,
+        result: {
+          ead_m: d.ead,
+          mod_m: d.mod,
+          po2_ata: d.po2AtDepth,
+          ndl_min: d.ndl,
+          rnt_min: d.rnt,
+          cns_pct: d.cns,
+          otus: d.otus,
+          gas_l: d.gasL,
+        },
+        raw: {
+          units,
+          tech,
+          gf_lo: gfLo,
+          gf_hi: gfHi,
+          dives,
+        },
+      };
+
+      const { error } = await supabase.from('plans').insert(payload);
+
+      if (error) {
+        console.error('Cloud save failed', error);
+        alert('Cloud save failed: ' + error.message);
+        return;
+      }
+
+      alert('Saved to cloud');
+    } catch (e: any) {
+      console.error('Cloud save failed', e);
+      alert('Cloud save failed: ' + (e?.message || 'unknown error'));
+    }
+  };
+
+  const handleSave = async () => {
+    saveLocal();
+    await saveCloud();
   };
 
   const copyPublicLink = async () => {
@@ -229,7 +321,8 @@ export default function PlannerPage() {
       gfHi: String(gfHi),
       payload: JSON.stringify(dives),
     });
-    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/planner?${params.toString()}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const url = `${origin}/planner?${params.toString()}`;
     try {
       await navigator.clipboard.writeText(url);
       alert('Link copied');
@@ -240,7 +333,7 @@ export default function PlannerPage() {
 
   // ---------- UI ----------
   return (
-    <main className="container max-w-5xl mx-auto p-4 space-y-6">
+    <main className="container max-w-5xl mx-auto p4 space-y-6 p-4">
       <h1 className="text-2xl font-semibold">Planner (Multi-Dive · EANx)</h1>
 
       <section className="card space-y-3">
@@ -441,7 +534,7 @@ export default function PlannerPage() {
 
       {/* Actions */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button className="btn" onClick={saveLocal}>
+        <button className="btn" onClick={handleSave}>
           Save
         </button>
         <button className="btn" onClick={copyPublicLink}>
